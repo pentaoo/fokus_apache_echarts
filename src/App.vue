@@ -17,14 +17,28 @@ import {
 import VChart from 'vue-echarts'
 import { applyChartStyle } from './chartStyle'
 import type {
+  AnimationEasing,
   BarArrangement,
   BarCategoryPosition,
   BarValuePosition,
-  ChartStyleConfig,
+  EmphasisFocus,
   LabelAlignment,
+  LegendPosition,
   LineStep,
+  LineStyleType,
+  PieLabelPosition,
   PieRoseType,
+  RadarShape,
+  ResolvedChartStyle,
+  SymbolShape,
+  ValueFormat,
 } from './chartStyle'
+import {
+  PALETTE_PRESETS,
+  createStylePreset,
+  type ChartType,
+  type PalettePresetId,
+} from './stylePresets'
 
 use([
   CanvasRenderer,
@@ -38,15 +52,6 @@ use([
   LegendComponent,
   TooltipComponent,
 ])
-
-type ChartType =
-  | 'line'
-  | 'bar'
-  | 'pie'
-  | 'doughnut'
-  | 'area'
-  | 'scatter'
-  | 'radar'
 
 type Renderer = 'canvas' | 'svg'
 type ChartTheme = 'light' | 'dark'
@@ -65,13 +70,7 @@ interface DataSeries {
   values: Array<number | null>
 }
 
-type StyleSettings = Required<ChartStyleConfig>
-type NumericStyleKey = {
-  [Key in keyof StyleSettings]: StyleSettings[Key] extends number ? Key : never
-}[keyof StyleSettings]
-type BooleanStyleKey = {
-  [Key in keyof StyleSettings]: StyleSettings[Key] extends boolean ? Key : never
-}[keyof StyleSettings]
+type StyleSettings = ResolvedChartStyle
 
 const initialCategories = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май']
 const initialSeries = [
@@ -123,64 +122,101 @@ const nextSeriesId = ref(3)
 const copied = ref(false)
 const isEditingCss = ref(false)
 const cssCode = ref('')
-const styleSettings = ref<StyleSettings>({
-  backgroundColor: '#050505',
-  textColor: '#ffffff',
-  mutedTextColor: '#b8b8c2',
-  palette: [
-    '#4d0ae2',
-    '#6e32e8',
-    '#8e5beb',
-    '#b00ae2',
-    '#e20ab3',
-    '#e20a6b',
-    '#e20a0e',
-    '#ff7a00',
-    '#ffc252',
-  ],
-  paletteOpacities: [100, 100, 100, 100, 100, 100, 100, 100, 100],
-  fontFamily: 'Inter, Arial, sans-serif',
-  fontWeight: 700,
-  categoryLabelSize: 14,
-  valueLabelSize: 22,
-  showAllLabels: true,
-  labelAlignment: 'center',
-  showLegend: true,
-  showTooltip: true,
-  showGridLines: false,
-  showAxisLines: false,
-  showAxisTicks: false,
-  animationDuration: 700,
-  barArrangement: 'grouped',
-  barGapPercent: 21,
-  barRadius: 100,
-  barRoundPeaks: true,
-  barMaxWidth: 120,
-  barOpacity: 100,
-  barValuePosition: 'top',
-  barCategoryPosition: 'axis',
-  colorBarsByData: true,
-  commonBarColor: false,
-  gradientBars: false,
-  lineWidth: 10,
-  smoothLines: true,
-  showLineSymbols: false,
-  lineSymbolSize: 10,
-  connectNulls: false,
-  lineStep: 'none',
-  areaOpacity: 24,
-  pieInnerRadius: 0,
-  pieOuterRadius: 70,
-  piePadAngle: 2,
-  pieStartAngle: 90,
-  pieClockwise: true,
-  pieRoseType: 'none',
-  showPieLabels: true,
-  scatterSymbolSize: 18,
-  scatterOpacity: 90,
-  showScatterLabels: false,
-  radarAreaOpacity: 20,
-})
+const selectedPaletteId = ref<PalettePresetId>('fokus')
+const styleSettings = ref<StyleSettings>(createStylePreset('line'))
+const styleSnapshots = new Map<ChartType, StyleSettings>()
+
+function cloneStyleSettings(settings: StyleSettings): StyleSettings {
+  return {
+    ...settings,
+    palette: [...settings.palette],
+    paletteOpacities: [...settings.paletteOpacities],
+  }
+}
+
+function selectChartType(nextType: ChartType) {
+  if (nextType === chartType.value) return
+
+  styleSnapshots.set(
+    chartType.value,
+    cloneStyleSettings(styleSettings.value),
+  )
+  chartType.value = nextType
+  styleSettings.value = styleSnapshots.has(nextType)
+    ? cloneStyleSettings(styleSnapshots.get(nextType)!)
+    : createStylePreset(nextType)
+  selectedPaletteId.value = 'custom'
+}
+
+function resetCurrentStyle() {
+  const next = createStylePreset(chartType.value)
+  styleSettings.value = next
+  styleSnapshots.set(chartType.value, cloneStyleSettings(next))
+  selectedPaletteId.value = 'fokus'
+}
+
+function applyPalette(presetId: Exclude<PalettePresetId, 'custom'>) {
+  const preset = PALETTE_PRESETS.find((item) => item.id === presetId)
+  if (!preset) return
+
+  styleSettings.value = {
+    ...styleSettings.value,
+    palette: [...preset.colors],
+    paletteOpacities: preset.colors.map(() => 100),
+  }
+  selectedPaletteId.value = preset.id
+}
+
+function markPaletteCustom() {
+  styleSettings.value = cloneStyleSettings(styleSettings.value)
+  selectedPaletteId.value = 'custom'
+}
+
+function addPaletteColor() {
+  if (styleSettings.value.palette.length >= 12) return
+  const lastColor =
+    styleSettings.value.palette.at(-1) ??
+    PALETTE_PRESETS[0].colors[0]
+  styleSettings.value = {
+    ...styleSettings.value,
+    palette: [...styleSettings.value.palette, lastColor],
+    paletteOpacities: [...styleSettings.value.paletteOpacities, 100],
+  }
+  selectedPaletteId.value = 'custom'
+}
+
+function removePaletteColor(index: number) {
+  if (styleSettings.value.palette.length <= 1) return
+  styleSettings.value = {
+    ...styleSettings.value,
+    palette: styleSettings.value.palette.filter(
+      (_, colorIndex) => colorIndex !== index,
+    ),
+    paletteOpacities: styleSettings.value.paletteOpacities.filter(
+      (_, colorIndex) => colorIndex !== index,
+    ),
+  }
+  selectedPaletteId.value = 'custom'
+}
+
+function movePaletteColor(index: number, direction: -1 | 1) {
+  const target = index + direction
+  if (target < 0 || target >= styleSettings.value.palette.length) return
+
+  const colors = [...styleSettings.value.palette]
+  const opacities = [...styleSettings.value.paletteOpacities]
+  ;[colors[index], colors[target]] = [colors[target], colors[index]]
+  ;[opacities[index], opacities[target]] = [
+    opacities[target],
+    opacities[index],
+  ]
+  styleSettings.value = {
+    ...styleSettings.value,
+    palette: [...colors],
+    paletteOpacities: [...opacities],
+  }
+  selectedPaletteId.value = 'custom'
+}
 
 function formatCss(settings: StyleSettings) {
   const palette = settings.palette
@@ -196,54 +232,132 @@ function formatCss(settings: StyleSettings) {
   --chart-background: ${settings.backgroundColor};
   --chart-text: ${settings.textColor};
   --chart-muted: ${settings.mutedTextColor};
+  --chart-font-family: ${settings.fontFamily};
   --chart-font-weight: ${settings.fontWeight};
-  --chart-value-label-size: ${settings.valueLabelSize}px;
-  --chart-category-label-size: ${settings.categoryLabelSize}px;
-  --chart-show-labels: ${Number(settings.showAllLabels)};
-  --chart-label-align: ${settings.labelAlignment};
+  --chart-padding: ${settings.chartPadding}px;
+  --chart-animation-duration: ${settings.animationDuration}ms;
+  --chart-animation-update-duration: ${settings.animationUpdateDuration}ms;
+  --chart-animation-easing: ${settings.animationEasing};
+
+  /* Легенда и tooltip */
   --chart-show-legend: ${Number(settings.showLegend)};
+  --chart-legend-position: ${settings.legendPosition};
+  --chart-legend-font-size: ${settings.legendFontSize}px;
+  --chart-legend-item-size: ${settings.legendItemSize}px;
+  --chart-legend-gap: ${settings.legendGap}px;
   --chart-show-tooltip: ${Number(settings.showTooltip)};
+  --chart-tooltip-background: ${settings.tooltipBackgroundColor};
+  --chart-tooltip-border: ${settings.tooltipBorderColor};
+  --chart-tooltip-font-size: ${settings.tooltipFontSize}px;
+
+  /* Подписи осей и значений */
+  --chart-show-x-axis-labels: ${Number(settings.showXAxisLabels)};
+  --chart-show-y-axis-labels: ${Number(settings.showYAxisLabels)};
+  --chart-show-value-labels: ${Number(settings.showValueLabels)};
+  --chart-label-align: ${settings.labelAlignment};
+  --chart-x-axis-label-size: ${settings.xAxisLabelSize}px;
+  --chart-y-axis-label-size: ${settings.yAxisLabelSize}px;
+  --chart-value-label-size: ${settings.valueLabelSize}px;
+  --chart-x-axis-label-rotate: ${settings.xAxisLabelRotate}deg;
+  --chart-y-axis-label-rotate: ${settings.yAxisLabelRotate}deg;
+  --chart-x-axis-label-margin: ${settings.xAxisLabelMargin}px;
+  --chart-y-axis-label-margin: ${settings.yAxisLabelMargin}px;
+  --chart-value-format: ${settings.valueFormat};
+  --chart-value-decimals: ${settings.valueDecimals};
+
+  /* Оси и сетка */
   --chart-show-grid: ${Number(settings.showGridLines)};
   --chart-show-axis-lines: ${Number(settings.showAxisLines)};
   --chart-show-axis-ticks: ${Number(settings.showAxisTicks)};
-  --chart-animation-duration: ${settings.animationDuration}ms;
+  --chart-grid-line-color: ${settings.gridLineColor};
+  --chart-grid-line-width: ${settings.gridLineWidth}px;
+  --chart-grid-line-type: ${settings.gridLineType};
+  --chart-axis-line-color: ${settings.axisLineColor};
+  --chart-boundary-gap: ${Number(settings.boundaryGap)};
+  --chart-y-axis-min: ${settings.yAxisMin ?? 'auto'};
+  --chart-y-axis-max: ${settings.yAxisMax ?? 'auto'};
+  --chart-y-axis-interval: ${settings.yAxisInterval ?? 'auto'};
 
   /* Столбцы */
   --chart-bar-arrangement: ${settings.barArrangement};
   --chart-bar-gap: ${settings.barGapPercent}%;
+  --chart-bar-series-gap: ${settings.barSeriesGapPercent}%;
   --chart-bar-radius: ${settings.barRadius}px;
   --chart-bar-round-peaks: ${Number(settings.barRoundPeaks)};
+  --chart-bar-width: ${settings.barWidth}px;
   --chart-bar-max-width: ${settings.barMaxWidth}px;
+  --chart-bar-min-height: ${settings.barMinHeight}px;
   --chart-bar-opacity: ${settings.barOpacity}%;
+  --chart-bar-border-width: ${settings.barBorderWidth}px;
+  --chart-bar-border-color: ${settings.barBorderColor};
   --chart-bar-value-position: ${settings.barValuePosition};
   --chart-bar-category-position: ${settings.barCategoryPosition};
   --chart-common-bar-color: ${Number(settings.commonBarColor)};
   --chart-gradient-bars: ${Number(settings.gradientBars)};
   --chart-color-bars-by-data: ${Number(settings.colorBarsByData)};
+  --chart-show-bar-background: ${Number(settings.showBarBackground)};
+  --chart-bar-background-color: ${settings.barBackgroundColor};
 
   /* Линии */
   --chart-line-width: ${settings.lineWidth}px;
+  --chart-line-opacity: ${settings.lineOpacity}%;
+  --chart-line-type: ${settings.lineType};
   --chart-smooth-lines: ${Number(settings.smoothLines)};
   --chart-show-line-symbols: ${Number(settings.showLineSymbols)};
   --chart-line-symbol-size: ${settings.lineSymbolSize}px;
+  --chart-line-symbol: ${settings.lineSymbol};
   --chart-connect-nulls: ${Number(settings.connectNulls)};
   --chart-line-step: ${settings.lineStep};
   --chart-area-opacity: ${settings.areaOpacity}%;
+  --chart-line-stacked: ${Number(settings.lineStacked)};
+  --chart-show-end-label: ${Number(settings.showEndLabel)};
 
   /* Круговые */
   --chart-pie-inner-radius: ${settings.pieInnerRadius}%;
   --chart-pie-outer-radius: ${settings.pieOuterRadius}%;
   --chart-pie-gap: ${settings.piePadAngle}deg;
   --chart-pie-start-angle: ${settings.pieStartAngle}deg;
+  --chart-pie-end-angle: ${settings.pieEndAngle}deg;
   --chart-pie-clockwise: ${Number(settings.pieClockwise)};
   --chart-pie-rose: ${settings.pieRoseType};
   --chart-show-pie-labels: ${Number(settings.showPieLabels)};
+  --chart-show-pie-label-lines: ${Number(settings.showPieLabelLines)};
+  --chart-pie-label-position: ${settings.pieLabelPosition};
+  --chart-pie-min-angle: ${settings.pieMinAngle}deg;
+  --chart-pie-border-radius: ${settings.pieBorderRadius}px;
+  --chart-pie-border-width: ${settings.pieBorderWidth}px;
+  --chart-pie-border-color: ${settings.pieBorderColor};
+  --chart-pie-selected-mode: ${Number(settings.pieSelectedMode)};
+  --chart-pie-selected-offset: ${settings.pieSelectedOffset}px;
 
-  /* Scatter и radar */
+  /* Scatter */
   --chart-scatter-symbol-size: ${settings.scatterSymbolSize}px;
+  --chart-scatter-symbol: ${settings.scatterSymbol};
+  --chart-scatter-symbol-rotate: ${settings.scatterSymbolRotate}deg;
   --chart-scatter-opacity: ${settings.scatterOpacity}%;
+  --chart-scatter-border-width: ${settings.scatterBorderWidth}px;
+  --chart-scatter-border-color: ${settings.scatterBorderColor};
+  --chart-scatter-shadow-blur: ${settings.scatterShadowBlur}px;
+  --chart-scatter-shadow-offset-x: ${settings.scatterShadowOffsetX}px;
+  --chart-scatter-shadow-offset-y: ${settings.scatterShadowOffsetY}px;
   --chart-show-scatter-labels: ${Number(settings.showScatterLabels)};
+
+  /* Radar */
   --chart-radar-area-opacity: ${settings.radarAreaOpacity}%;
+  --chart-radar-shape: ${settings.radarShape};
+  --chart-radar-radius: ${settings.radarRadius}%;
+  --chart-radar-split-number: ${settings.radarSplitNumber};
+  --chart-show-radar-names: ${Number(settings.showRadarNames)};
+  --chart-show-radar-split-area: ${Number(settings.showRadarSplitArea)};
+  --chart-radar-split-area-opacity: ${settings.radarSplitAreaOpacity}%;
+  --chart-radar-line-width: ${settings.radarLineWidth}px;
+  --chart-radar-line-type: ${settings.radarLineType};
+
+  /* Состояния */
+  --chart-emphasis-focus: ${settings.emphasisFocus};
+  --chart-emphasis-scale: ${Number(settings.emphasisScale)};
+  --chart-blur-opacity: ${settings.blurOpacity}%;
+  --chart-select-border-width: ${settings.selectBorderWidth}px;
 
   /* Палитра */
 ${palette}
@@ -274,6 +388,23 @@ function numberInRange(value: string, minimum: number, maximum: number) {
     : null
 }
 
+function updateNullableStyleNumber(
+  event: Event,
+  key: 'yAxisMin' | 'yAxisMax' | 'yAxisInterval',
+) {
+  const rawValue = (event.target as HTMLInputElement).value
+  if (rawValue === '') {
+    styleSettings.value[key] = null
+    return
+  }
+
+  const parsed = Number(rawValue)
+  if (Number.isFinite(parsed)) {
+    styleSettings.value[key] =
+      key === 'yAxisInterval' ? Math.max(0, parsed) : parsed
+  }
+}
+
 function applyCssCode(value: string) {
   cssCode.value = value
   const declarations = new Map<string, string>()
@@ -284,85 +415,163 @@ function applyCssCode(value: string) {
     declarations.set(match[1], match[2].trim())
   }
 
-  const next = { ...styleSettings.value }
-  const background = normalizeHexColor(declarations.get('background') ?? '')
-  const text = normalizeHexColor(declarations.get('text') ?? '')
-  const muted = normalizeHexColor(declarations.get('muted') ?? '')
+  const next = cloneStyleSettings(styleSettings.value)
 
-  if (background) next.backgroundColor = background
-  if (text) next.textColor = text
-  if (muted) next.mutedTextColor = muted
+  const colorVariables: Array<[string, keyof StyleSettings]> = [
+    ['background', 'backgroundColor'],
+    ['text', 'textColor'],
+    ['muted', 'mutedTextColor'],
+    ['tooltip-background', 'tooltipBackgroundColor'],
+    ['tooltip-border', 'tooltipBorderColor'],
+    ['grid-line-color', 'gridLineColor'],
+    ['axis-line-color', 'axisLineColor'],
+    ['bar-border-color', 'barBorderColor'],
+    ['bar-background-color', 'barBackgroundColor'],
+    ['pie-border-color', 'pieBorderColor'],
+    ['scatter-border-color', 'scatterBorderColor'],
+  ]
+
+  colorVariables.forEach(([variable, key]) => {
+    const color = normalizeHexColor(declarations.get(variable) ?? '')
+    if (color) next[key] = color as never
+  })
+
+  const fontFamily = declarations.get('font-family')?.trim()
+  if (fontFamily && !/[{};]/.test(fontFamily)) {
+    next.fontFamily = fontFamily.slice(0, 120)
+  }
 
   const numericVariables: Array<
-    [string, NumericStyleKey, number, number]
+    [string, keyof StyleSettings, number, number]
   > = [
     ['font-weight', 'fontWeight', 400, 900],
-    ['value-label-size', 'valueLabelSize', 10, 48],
-    ['category-label-size', 'categoryLabelSize', 10, 30],
+    ['padding', 'chartPadding', 8, 80],
     ['animation-duration', 'animationDuration', 0, 3000],
+    ['animation-update-duration', 'animationUpdateDuration', 0, 3000],
+    ['legend-font-size', 'legendFontSize', 8, 30],
+    ['legend-item-size', 'legendItemSize', 6, 30],
+    ['legend-gap', 'legendGap', 0, 60],
+    ['tooltip-font-size', 'tooltipFontSize', 8, 30],
+    ['x-axis-label-size', 'xAxisLabelSize', 8, 40],
+    ['y-axis-label-size', 'yAxisLabelSize', 8, 40],
+    ['value-label-size', 'valueLabelSize', 10, 48],
+    ['x-axis-label-rotate', 'xAxisLabelRotate', -90, 90],
+    ['y-axis-label-rotate', 'yAxisLabelRotate', -90, 90],
+    ['x-axis-label-margin', 'xAxisLabelMargin', 0, 60],
+    ['y-axis-label-margin', 'yAxisLabelMargin', 0, 60],
+    ['value-decimals', 'valueDecimals', 0, 4],
+    ['grid-line-width', 'gridLineWidth', 1, 8],
     ['bar-gap', 'barGapPercent', 0, 100],
+    ['bar-series-gap', 'barSeriesGapPercent', -100, 100],
     ['bar-radius', 'barRadius', 0, 120],
+    ['bar-width', 'barWidth', 0, 180],
     ['bar-max-width', 'barMaxWidth', 20, 180],
+    ['bar-min-height', 'barMinHeight', 0, 80],
     ['bar-opacity', 'barOpacity', 0, 100],
+    ['bar-border-width', 'barBorderWidth', 0, 20],
     ['line-width', 'lineWidth', 1, 40],
+    ['line-opacity', 'lineOpacity', 0, 100],
     ['line-symbol-size', 'lineSymbolSize', 2, 40],
     ['area-opacity', 'areaOpacity', 0, 100],
     ['pie-inner-radius', 'pieInnerRadius', 0, 80],
     ['pie-outer-radius', 'pieOuterRadius', 20, 100],
     ['pie-gap', 'piePadAngle', 0, 20],
     ['pie-start-angle', 'pieStartAngle', 0, 360],
+    ['pie-end-angle', 'pieEndAngle', 0, 360],
+    ['pie-min-angle', 'pieMinAngle', 0, 90],
+    ['pie-border-radius', 'pieBorderRadius', 0, 80],
+    ['pie-border-width', 'pieBorderWidth', 0, 20],
+    ['pie-selected-offset', 'pieSelectedOffset', 0, 60],
     ['scatter-symbol-size', 'scatterSymbolSize', 4, 80],
+    ['scatter-symbol-rotate', 'scatterSymbolRotate', 0, 360],
     ['scatter-opacity', 'scatterOpacity', 0, 100],
+    ['scatter-border-width', 'scatterBorderWidth', 0, 20],
+    ['scatter-shadow-blur', 'scatterShadowBlur', 0, 60],
+    ['scatter-shadow-offset-x', 'scatterShadowOffsetX', -30, 30],
+    ['scatter-shadow-offset-y', 'scatterShadowOffsetY', -30, 30],
     ['radar-area-opacity', 'radarAreaOpacity', 0, 100],
+    ['radar-radius', 'radarRadius', 20, 90],
+    ['radar-split-number', 'radarSplitNumber', 1, 10],
+    ['radar-split-area-opacity', 'radarSplitAreaOpacity', 0, 40],
+    ['radar-line-width', 'radarLineWidth', 1, 20],
+    ['blur-opacity', 'blurOpacity', 0, 100],
+    ['select-border-width', 'selectBorderWidth', 0, 20],
   ]
 
   numericVariables.forEach(([variable, key, minimum, maximum]) => {
     const raw = declarations.get(variable)
     if (raw === undefined) return
     const parsed = numberInRange(raw, minimum, maximum)
+    if (parsed !== null) next[key] = parsed as never
+  })
+
+  const nullableNumberVariables: Array<
+    [string, 'yAxisMin' | 'yAxisMax' | 'yAxisInterval', number, number]
+  > = [
+    ['y-axis-min', 'yAxisMin', -1_000_000_000, 1_000_000_000],
+    ['y-axis-max', 'yAxisMax', -1_000_000_000, 1_000_000_000],
+    ['y-axis-interval', 'yAxisInterval', 0, 1_000_000_000],
+  ]
+
+  nullableNumberVariables.forEach(([variable, key, minimum, maximum]) => {
+    const raw = declarations.get(variable)
+    if (raw === undefined) return
+    if (raw.trim().toLowerCase() === 'auto') {
+      next[key] = null
+      return
+    }
+    const parsed = numberInRange(raw, minimum, maximum)
     if (parsed !== null) next[key] = parsed
   })
 
-  const booleanVariables: Array<[string, BooleanStyleKey]> = [
-    ['show-labels', 'showAllLabels'],
+  const booleanVariables: Array<[string, keyof StyleSettings]> = [
     ['show-legend', 'showLegend'],
     ['show-tooltip', 'showTooltip'],
+    ['show-x-axis-labels', 'showXAxisLabels'],
+    ['show-y-axis-labels', 'showYAxisLabels'],
+    ['show-value-labels', 'showValueLabels'],
     ['show-grid', 'showGridLines'],
     ['show-axis-lines', 'showAxisLines'],
     ['show-axis-ticks', 'showAxisTicks'],
+    ['boundary-gap', 'boundaryGap'],
     ['bar-round-peaks', 'barRoundPeaks'],
     ['common-bar-color', 'commonBarColor'],
     ['gradient-bars', 'gradientBars'],
     ['color-bars-by-data', 'colorBarsByData'],
+    ['show-bar-background', 'showBarBackground'],
     ['smooth-lines', 'smoothLines'],
     ['show-line-symbols', 'showLineSymbols'],
     ['connect-nulls', 'connectNulls'],
+    ['line-stacked', 'lineStacked'],
+    ['show-end-label', 'showEndLabel'],
     ['pie-clockwise', 'pieClockwise'],
     ['show-pie-labels', 'showPieLabels'],
+    ['show-pie-label-lines', 'showPieLabelLines'],
+    ['pie-selected-mode', 'pieSelectedMode'],
     ['show-scatter-labels', 'showScatterLabels'],
+    ['show-radar-names', 'showRadarNames'],
+    ['show-radar-split-area', 'showRadarSplitArea'],
+    ['emphasis-scale', 'emphasisScale'],
   ]
 
   booleanVariables.forEach(([variable, key]) => {
     const raw = declarations.get(variable)
-    if (raw !== undefined) next[key] = parseBoolean(raw)
+    if (raw !== undefined) next[key] = parseBoolean(raw) as never
   })
 
-  const enums: Array<
-    [
-      string,
-      keyof Pick<
-        StyleSettings,
-        | 'labelAlignment'
-        | 'barArrangement'
-        | 'barValuePosition'
-        | 'barCategoryPosition'
-        | 'lineStep'
-        | 'pieRoseType'
-      >,
-      readonly string[],
-    ]
-  > = [
+  const enums: Array<[string, keyof StyleSettings, readonly string[]]> = [
+    ['animation-easing', 'animationEasing', [
+      'linear',
+      'cubicIn',
+      'cubicOut',
+      'cubicInOut',
+      'quarticOut',
+      'elasticOut',
+    ]],
+    ['legend-position', 'legendPosition', ['top', 'bottom', 'left', 'right']],
     ['label-align', 'labelAlignment', ['left', 'center', 'right']],
+    ['value-format', 'valueFormat', ['number', 'percent', 'compact']],
+    ['grid-line-type', 'gridLineType', ['solid', 'dashed', 'dotted']],
     [
       'bar-arrangement',
       'barArrangement',
@@ -370,14 +579,37 @@ function applyCssCode(value: string) {
     ],
     ['bar-value-position', 'barValuePosition', ['inside', 'top']],
     ['bar-category-position', 'barCategoryPosition', ['axis', 'inside']],
+    ['line-type', 'lineType', ['solid', 'dashed', 'dotted']],
+    ['line-symbol', 'lineSymbol', [
+      'circle',
+      'rect',
+      'roundRect',
+      'triangle',
+      'diamond',
+      'pin',
+      'arrow',
+    ]],
     ['line-step', 'lineStep', ['none', 'start', 'middle', 'end']],
-    ['pie-rose', 'pieRoseType', ['none', 'radius']],
+    ['pie-rose', 'pieRoseType', ['none', 'radius', 'area']],
+    ['pie-label-position', 'pieLabelPosition', ['outside', 'inside', 'center']],
+    ['scatter-symbol', 'scatterSymbol', [
+      'circle',
+      'rect',
+      'roundRect',
+      'triangle',
+      'diamond',
+      'pin',
+      'arrow',
+    ]],
+    ['radar-shape', 'radarShape', ['polygon', 'circle']],
+    ['radar-line-type', 'radarLineType', ['solid', 'dashed', 'dotted']],
+    ['emphasis-focus', 'emphasisFocus', ['none', 'self', 'series']],
   ]
 
   enums.forEach(([variable, key, allowed]) => {
     const raw = declarations.get(variable)?.trim()
     if (raw && allowed.includes(raw)) {
-      ;(next[key] as string) = raw
+      next[key] = raw as never
     }
   })
 
@@ -397,6 +629,7 @@ function applyCssCode(value: string) {
   })
 
   styleSettings.value = next
+  selectedPaletteId.value = 'custom'
 }
 
 function finishCssEditing() {
@@ -471,7 +704,7 @@ function randomizeChartStyle() {
   const pieInnerRadius =
     nextType === 'doughnut' ? randomInteger(28, 58) : randomInteger(0, 22)
 
-  chartType.value = nextType
+  selectChartType(nextType)
   styleSettings.value = {
     ...styleSettings.value,
     backgroundColor: hslToHex(
@@ -484,15 +717,24 @@ function randomizeChartStyle() {
     palette,
     paletteOpacities: palette.map(() => randomInteger(78, 100)),
     fontWeight: randomChoice([500, 600, 700, 800, 900]),
-    categoryLabelSize: randomInteger(11, 18),
+    xAxisLabelSize: randomInteger(11, 18),
+    yAxisLabelSize: randomInteger(10, 16),
     valueLabelSize: randomInteger(14, 32),
-    showAllLabels: randomBoolean(0.78),
+    showXAxisLabels: randomBoolean(0.86),
+    showYAxisLabels: randomBoolean(0.72),
+    showValueLabels: randomBoolean(0.48),
     labelAlignment: randomChoice<LabelAlignment>([
       'left',
       'center',
       'right',
     ]),
     showLegend: randomBoolean(0.72),
+    legendPosition: randomChoice<LegendPosition>([
+      'top',
+      'bottom',
+      'left',
+      'right',
+    ]),
     showTooltip: true,
     showGridLines: randomBoolean(0.34),
     showAxisLines: randomBoolean(0.28),
@@ -514,6 +756,8 @@ function randomizeChartStyle() {
     commonBarColor: randomBoolean(0.18),
     gradientBars: randomBoolean(0.48),
     lineWidth: randomInteger(2, 18),
+    lineOpacity: randomInteger(70, 100),
+    lineType: randomChoice<LineStyleType>(['solid', 'dashed', 'dotted']),
     smoothLines: randomBoolean(0.72),
     showLineSymbols: randomBoolean(0.48),
     lineSymbolSize: randomInteger(5, 22),
@@ -541,6 +785,7 @@ function randomizeChartStyle() {
     showScatterLabels: randomBoolean(0.42),
     radarAreaOpacity: randomInteger(10, 46),
   }
+  selectedPaletteId.value = 'custom'
 }
 
 function cloneInitialSeries(): DataSeries[] {
@@ -740,13 +985,46 @@ const rawOption = computed<ChartOption>(() => {
   }
 })
 
-const option = computed<ChartOption>(() =>
-  styleMode.value === 'poster'
-    ? applyChartStyle(rawOption.value, styleSettings.value)
-    : rawOption.value,
-)
+const styleRevision = computed(() => JSON.stringify(styleSettings.value))
 
-const optionText = computed(() => JSON.stringify(option.value, null, 2))
+const option = computed<ChartOption>(() => {
+  const settingsSnapshot = JSON.parse(
+    styleRevision.value,
+  ) as StyleSettings
+  return styleMode.value === 'poster'
+    ? applyChartStyle(rawOption.value, settingsSnapshot)
+    : rawOption.value
+})
+
+type OptionFunction = {
+  __echartsOptionSource?: string
+  toString: () => string
+}
+
+function serializeOption(value: ChartOption) {
+  const functionSources: string[] = []
+  const serialized = JSON.stringify(
+    value,
+    (_key, currentValue: unknown) => {
+      if (typeof currentValue !== 'function') return currentValue
+
+      const optionFunction = currentValue as OptionFunction
+      const functionIndex =
+        functionSources.push(
+          optionFunction.__echartsOptionSource ?? optionFunction.toString(),
+        ) - 1
+      return `__ECHARTS_OPTION_FUNCTION_${functionIndex}__`
+    },
+    2,
+  )
+
+  return serialized.replace(
+    /"__ECHARTS_OPTION_FUNCTION_(\d+)__"/g,
+    (_match, index: string) => functionSources[Number(index)] ?? 'undefined',
+  )
+}
+
+const optionText = computed(() => serializeOption(option.value))
 
 async function copyOption() {
   await navigator.clipboard.writeText(optionText.value)
@@ -877,7 +1155,7 @@ async function copyOption() {
                   type="button"
                   :class="{ active: chartType === item.value }"
                   :aria-pressed="chartType === item.value"
-                  @click="chartType = item.value"
+                  @click="selectChartType(item.value)"
                 >
                   <span class="chart-type-icon" aria-hidden="true">
                     {{ item.value === 'bar' ? '▥' : item.value === 'line' ? '⌁' : item.value === 'area' ? '◒' : item.value === 'pie' ? '◔' : item.value === 'doughnut' ? '⊙' : item.value === 'scatter' ? '⁙' : '◇' }}
@@ -885,14 +1163,23 @@ async function copyOption() {
                   {{ item.label }}
                 </button>
               </div>
-              <button
-                class="random-chart-button"
-                type="button"
-                @click="randomizeChartStyle"
-              >
-                <span aria-hidden="true">✦</span>
-                Рандомный стиль
-              </button>
+              <div class="preset-actions">
+                <button
+                  class="random-chart-button"
+                  type="button"
+                  @click="randomizeChartStyle"
+                >
+                  <span aria-hidden="true">✦</span>
+                  Рандомный стиль
+                </button>
+                <button
+                  class="reset-style-button"
+                  type="button"
+                  @click="resetCurrentStyle"
+                >
+                  Сбросить стиль типа
+                </button>
+              </div>
             </section>
 
             <section
@@ -910,6 +1197,16 @@ async function copyOption() {
                   max="100"
                 />
                 <output>{{ styleSettings.barGapPercent }}%</output>
+              </label>
+              <label class="range-control">
+                <span>Между сериями</span>
+                <input
+                  v-model.number="styleSettings.barSeriesGapPercent"
+                  type="range"
+                  min="-100"
+                  max="100"
+                />
+                <output>{{ styleSettings.barSeriesGapPercent }}%</output>
               </label>
               <div class="choice-row">
                 <span>Компоновка</span>
@@ -940,7 +1237,7 @@ async function copyOption() {
                 <output>{{ styleSettings.barRadius }} px</output>
               </label>
               <label class="range-control">
-                <span>Ширина</span>
+                <span>Макс. ширина</span>
                 <input
                   v-model.number="styleSettings.barMaxWidth"
                   type="range"
@@ -983,6 +1280,14 @@ async function copyOption() {
                   <span aria-hidden="true" />
                   Цвет по категориям
                 </label>
+                <label class="switch-control">
+                  <input
+                    v-model="styleSettings.showBarBackground"
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" />
+                  Фон столбцов
+                </label>
               </div>
               <div class="choice-row">
                 <span>Значения</span>
@@ -1018,6 +1323,59 @@ async function copyOption() {
                   </button>
                 </div>
               </div>
+              <details class="advanced-settings">
+                <summary>Ширина, граница и фон</summary>
+                <label class="range-control">
+                  <span>Точная ширина</span>
+                  <input
+                    v-model.number="styleSettings.barWidth"
+                    type="range"
+                    min="0"
+                    max="180"
+                  />
+                  <output>
+                    {{ styleSettings.barWidth === 0 ? 'Авто' : `${styleSettings.barWidth} px` }}
+                  </output>
+                </label>
+                <label class="range-control">
+                  <span>Мин. высота</span>
+                  <input
+                    v-model.number="styleSettings.barMinHeight"
+                    type="range"
+                    min="0"
+                    max="80"
+                  />
+                  <output>{{ styleSettings.barMinHeight }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Граница</span>
+                  <input
+                    v-model.number="styleSettings.barBorderWidth"
+                    type="range"
+                    min="0"
+                    max="20"
+                  />
+                  <output>{{ styleSettings.barBorderWidth }} px</output>
+                </label>
+                <div class="color-controls compact-colors">
+                  <label>
+                    <span>Граница</span>
+                    <input
+                      v-model="styleSettings.barBorderColor"
+                      type="color"
+                    />
+                    <code>{{ styleSettings.barBorderColor }}</code>
+                  </label>
+                  <label>
+                    <span>Фон</span>
+                    <input
+                      v-model="styleSettings.barBackgroundColor"
+                      type="color"
+                    />
+                    <code>{{ styleSettings.barBackgroundColor }}</code>
+                  </label>
+                </div>
+              </details>
             </section>
 
             <section
@@ -1037,6 +1395,27 @@ async function copyOption() {
                   max="40"
                 />
                 <output>{{ styleSettings.lineWidth }} px</output>
+              </label>
+              <label class="range-control">
+                <span>Непрозрачность</span>
+                <input
+                  v-model.number="styleSettings.lineOpacity"
+                  type="range"
+                  min="0"
+                  max="100"
+                />
+                <output>{{ styleSettings.lineOpacity }}%</output>
+              </label>
+              <label class="select-control">
+                <span>Тип линии</span>
+                <select
+                  :value="styleSettings.lineType"
+                  @change="styleSettings.lineType = ($event.target as HTMLSelectElement).value as LineStyleType"
+                >
+                  <option value="solid">Сплошная</option>
+                  <option value="dashed">Штриховая</option>
+                  <option value="dotted">Точки</option>
+                </select>
               </label>
               <label class="range-control">
                 <span>Размер точек</span>
@@ -1077,7 +1456,33 @@ async function copyOption() {
                   <span aria-hidden="true" />
                   Соединять пропуски
                 </label>
+                <label class="switch-control">
+                  <input v-model="styleSettings.lineStacked" type="checkbox" />
+                  <span aria-hidden="true" />
+                  Сложение серий
+                </label>
+                <label class="switch-control">
+                  <input v-model="styleSettings.showEndLabel" type="checkbox" />
+                  <span aria-hidden="true" />
+                  Значение в конце
+                </label>
               </div>
+              <label class="select-control">
+                <span>Форма точек</span>
+                <select
+                  :value="styleSettings.lineSymbol"
+                  :disabled="!styleSettings.showLineSymbols"
+                  @change="styleSettings.lineSymbol = ($event.target as HTMLSelectElement).value as SymbolShape"
+                >
+                  <option value="circle">Круг</option>
+                  <option value="rect">Квадрат</option>
+                  <option value="roundRect">Скруглённый</option>
+                  <option value="triangle">Треугольник</option>
+                  <option value="diamond">Ромб</option>
+                  <option value="pin">Метка</option>
+                  <option value="arrow">Стрелка</option>
+                </select>
+              </label>
               <label class="select-control">
                 <span>Ступенчатая линия</span>
                 <select v-model="styleSettings.lineStep">
@@ -1135,6 +1540,26 @@ async function copyOption() {
                 />
                 <output>{{ styleSettings.pieStartAngle }}°</output>
               </label>
+              <label class="range-control">
+                <span>Конечный угол</span>
+                <input
+                  v-model.number="styleSettings.pieEndAngle"
+                  type="range"
+                  min="0"
+                  max="360"
+                />
+                <output>{{ styleSettings.pieEndAngle }}°</output>
+              </label>
+              <label class="range-control">
+                <span>Мин. сектор</span>
+                <input
+                  v-model.number="styleSettings.pieMinAngle"
+                  type="range"
+                  min="0"
+                  max="90"
+                />
+                <output>{{ styleSettings.pieMinAngle }}°</output>
+              </label>
               <div class="switch-grid">
                 <label class="switch-control">
                   <input v-model="styleSettings.pieClockwise" type="checkbox" />
@@ -1146,14 +1571,88 @@ async function copyOption() {
                   <span aria-hidden="true" />
                   Подписи секторов
                 </label>
+                <label class="switch-control">
+                  <input
+                    v-model="styleSettings.showPieLabelLines"
+                    :disabled="!styleSettings.showPieLabels"
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" />
+                  Линии подписей
+                </label>
+                <label class="switch-control">
+                  <input
+                    v-model="styleSettings.pieSelectedMode"
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" />
+                  Выбор сектора
+                </label>
               </div>
+              <label class="select-control">
+                <span>Положение подписей</span>
+                <select
+                  :value="styleSettings.pieLabelPosition"
+                  :disabled="!styleSettings.showPieLabels"
+                  @change="styleSettings.pieLabelPosition = ($event.target as HTMLSelectElement).value as PieLabelPosition"
+                >
+                  <option value="outside">Снаружи</option>
+                  <option value="inside">Внутри</option>
+                  <option value="center">В центре</option>
+                </select>
+              </label>
               <label class="select-control">
                 <span>Роза Найтингейл</span>
                 <select v-model="styleSettings.pieRoseType">
                   <option value="none">Выключена</option>
                   <option value="radius">По радиусу</option>
+                  <option value="area">По площади</option>
                 </select>
               </label>
+              <details class="advanced-settings">
+                <summary>Граница и выбор</summary>
+                <label class="range-control">
+                  <span>Скругление</span>
+                  <input
+                    v-model.number="styleSettings.pieBorderRadius"
+                    type="range"
+                    min="0"
+                    max="80"
+                  />
+                  <output>{{ styleSettings.pieBorderRadius }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Толщина границы</span>
+                  <input
+                    v-model.number="styleSettings.pieBorderWidth"
+                    type="range"
+                    min="0"
+                    max="20"
+                  />
+                  <output>{{ styleSettings.pieBorderWidth }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Смещение выбора</span>
+                  <input
+                    v-model.number="styleSettings.pieSelectedOffset"
+                    :disabled="!styleSettings.pieSelectedMode"
+                    type="range"
+                    min="0"
+                    max="60"
+                  />
+                  <output>{{ styleSettings.pieSelectedOffset }} px</output>
+                </label>
+                <div class="color-controls compact-colors">
+                  <label>
+                    <span>Граница</span>
+                    <input
+                      v-model="styleSettings.pieBorderColor"
+                      type="color"
+                    />
+                    <code>{{ styleSettings.pieBorderColor }}</code>
+                  </label>
+                </div>
+              </details>
             </section>
 
             <section
@@ -1182,6 +1681,31 @@ async function copyOption() {
                 />
                 <output>{{ styleSettings.scatterOpacity }}%</output>
               </label>
+              <label class="select-control">
+                <span>Форма точек</span>
+                <select
+                  :value="styleSettings.scatterSymbol"
+                  @change="styleSettings.scatterSymbol = ($event.target as HTMLSelectElement).value as SymbolShape"
+                >
+                  <option value="circle">Круг</option>
+                  <option value="rect">Квадрат</option>
+                  <option value="roundRect">Скруглённый</option>
+                  <option value="triangle">Треугольник</option>
+                  <option value="diamond">Ромб</option>
+                  <option value="pin">Метка</option>
+                  <option value="arrow">Стрелка</option>
+                </select>
+              </label>
+              <label class="range-control">
+                <span>Поворот</span>
+                <input
+                  v-model.number="styleSettings.scatterSymbolRotate"
+                  type="range"
+                  min="0"
+                  max="360"
+                />
+                <output>{{ styleSettings.scatterSymbolRotate }}°</output>
+              </label>
               <label class="switch-control">
                 <input
                   v-model="styleSettings.showScatterLabels"
@@ -1190,6 +1714,59 @@ async function copyOption() {
                 <span aria-hidden="true" />
                 Подписи точек
               </label>
+              <details class="advanced-settings">
+                <summary>Граница и тень</summary>
+                <label class="range-control">
+                  <span>Граница</span>
+                  <input
+                    v-model.number="styleSettings.scatterBorderWidth"
+                    type="range"
+                    min="0"
+                    max="20"
+                  />
+                  <output>{{ styleSettings.scatterBorderWidth }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Размытие тени</span>
+                  <input
+                    v-model.number="styleSettings.scatterShadowBlur"
+                    type="range"
+                    min="0"
+                    max="60"
+                  />
+                  <output>{{ styleSettings.scatterShadowBlur }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Смещение X</span>
+                  <input
+                    v-model.number="styleSettings.scatterShadowOffsetX"
+                    type="range"
+                    min="-30"
+                    max="30"
+                  />
+                  <output>{{ styleSettings.scatterShadowOffsetX }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Смещение Y</span>
+                  <input
+                    v-model.number="styleSettings.scatterShadowOffsetY"
+                    type="range"
+                    min="-30"
+                    max="30"
+                  />
+                  <output>{{ styleSettings.scatterShadowOffsetY }} px</output>
+                </label>
+                <div class="color-controls compact-colors">
+                  <label>
+                    <span>Граница</span>
+                    <input
+                      v-model="styleSettings.scatterBorderColor"
+                      type="color"
+                    />
+                    <code>{{ styleSettings.scatterBorderColor }}</code>
+                  </label>
+                </div>
+              </details>
             </section>
 
             <section
@@ -1201,12 +1778,12 @@ async function copyOption() {
               <label class="range-control">
                 <span>Толщина линии</span>
                 <input
-                  v-model.number="styleSettings.lineWidth"
+                  v-model.number="styleSettings.radarLineWidth"
                   type="range"
                   min="1"
-                  max="40"
+                  max="20"
                 />
-                <output>{{ styleSettings.lineWidth }} px</output>
+                <output>{{ styleSettings.radarLineWidth }} px</output>
               </label>
               <label class="range-control">
                 <span>Размер точек</span>
@@ -1218,6 +1795,19 @@ async function copyOption() {
                 />
                 <output>{{ styleSettings.lineSymbolSize }} px</output>
               </label>
+              <label class="select-control">
+                <span>Форма точек</span>
+                <select
+                  :value="styleSettings.lineSymbol"
+                  @change="styleSettings.lineSymbol = ($event.target as HTMLSelectElement).value as SymbolShape"
+                >
+                  <option value="circle">Круг</option>
+                  <option value="rect">Квадрат</option>
+                  <option value="roundRect">Скруглённый</option>
+                  <option value="triangle">Треугольник</option>
+                  <option value="diamond">Ромб</option>
+                </select>
+              </label>
               <label class="range-control">
                 <span>Заливка</span>
                 <input
@@ -1228,10 +1818,106 @@ async function copyOption() {
                 />
                 <output>{{ styleSettings.radarAreaOpacity }}%</output>
               </label>
+              <label class="range-control">
+                <span>Радиус</span>
+                <input
+                  v-model.number="styleSettings.radarRadius"
+                  type="range"
+                  min="20"
+                  max="90"
+                />
+                <output>{{ styleSettings.radarRadius }}%</output>
+              </label>
+              <label class="range-control">
+                <span>Деления</span>
+                <input
+                  v-model.number="styleSettings.radarSplitNumber"
+                  type="range"
+                  min="1"
+                  max="10"
+                />
+                <output>{{ styleSettings.radarSplitNumber }}</output>
+              </label>
+              <label class="select-control">
+                <span>Форма сетки</span>
+                <select
+                  :value="styleSettings.radarShape"
+                  @change="styleSettings.radarShape = ($event.target as HTMLSelectElement).value as RadarShape"
+                >
+                  <option value="polygon">Многоугольник</option>
+                  <option value="circle">Круг</option>
+                </select>
+              </label>
+              <label class="select-control">
+                <span>Тип линии</span>
+                <select
+                  :value="styleSettings.radarLineType"
+                  @change="styleSettings.radarLineType = ($event.target as HTMLSelectElement).value as LineStyleType"
+                >
+                  <option value="solid">Сплошная</option>
+                  <option value="dashed">Штриховая</option>
+                  <option value="dotted">Точки</option>
+                </select>
+              </label>
+              <div class="switch-grid">
+                <label class="switch-control">
+                  <input v-model="styleSettings.showRadarNames" type="checkbox" />
+                  <span aria-hidden="true" />
+                  Названия индикаторов
+                </label>
+                <label class="switch-control">
+                  <input
+                    v-model="styleSettings.showRadarSplitArea"
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" />
+                  Чередование областей
+                </label>
+              </div>
+              <label class="range-control">
+                <span>Области сетки</span>
+                <input
+                  v-model.number="styleSettings.radarSplitAreaOpacity"
+                  :disabled="!styleSettings.showRadarSplitArea"
+                  type="range"
+                  min="0"
+                  max="40"
+                />
+                <output>{{ styleSettings.radarSplitAreaOpacity }}%</output>
+              </label>
             </section>
 
             <section class="setting-group" aria-labelledby="text-title">
-              <h3 id="text-title">Текст</h3>
+              <h3 id="text-title">Подписи осей и значений</h3>
+              <div
+                v-if="['line', 'bar', 'area', 'scatter'].includes(chartType)"
+                class="switch-grid"
+              >
+                <label class="switch-control">
+                  <input
+                    v-model="styleSettings.showXAxisLabels"
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" />
+                  Горизонтальная ось
+                </label>
+                <label class="switch-control">
+                  <input
+                    v-model="styleSettings.showYAxisLabels"
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" />
+                  Вертикальная ось
+                </label>
+              </div>
+              <label class="switch-control">
+                <input
+                  v-model="styleSettings.showValueLabels"
+                  type="checkbox"
+                />
+                <span aria-hidden="true" />
+                Значения на графике
+              </label>
               <label class="range-control">
                 <span>Размер значений</span>
                 <input
@@ -1242,16 +1928,30 @@ async function copyOption() {
                 />
                 <output>{{ styleSettings.valueLabelSize }} px</output>
               </label>
-              <label class="range-control">
-                <span>Размер категорий</span>
-                <input
-                  v-model.number="styleSettings.categoryLabelSize"
-                  type="range"
-                  min="10"
-                  max="30"
-                />
-                <output>{{ styleSettings.categoryLabelSize }} px</output>
-              </label>
+              <template
+                v-if="['line', 'bar', 'area', 'scatter'].includes(chartType)"
+              >
+                <label class="range-control">
+                  <span>Гориз. ось</span>
+                  <input
+                    v-model.number="styleSettings.xAxisLabelSize"
+                    type="range"
+                    min="8"
+                    max="40"
+                  />
+                  <output>{{ styleSettings.xAxisLabelSize }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Вертик. ось</span>
+                  <input
+                    v-model.number="styleSettings.yAxisLabelSize"
+                    type="range"
+                    min="8"
+                    max="40"
+                  />
+                  <output>{{ styleSettings.yAxisLabelSize }} px</output>
+                </label>
+              </template>
               <label class="range-control">
                 <span>Насыщенность</span>
                 <input
@@ -1262,6 +1962,17 @@ async function copyOption() {
                   step="100"
                 />
                 <output>{{ styleSettings.fontWeight }}</output>
+              </label>
+              <label class="select-control">
+                <span>Шрифт</span>
+                <select v-model="styleSettings.fontFamily">
+                  <option value="Inter, Arial, sans-serif">Inter</option>
+                  <option value="Arial, sans-serif">Arial</option>
+                  <option value="Georgia, serif">Georgia</option>
+                  <option value="'SFMono-Regular', Consolas, monospace">
+                    Моноширинный
+                  </option>
+                </select>
               </label>
               <div class="choice-row">
                 <span>Выравнивание</span>
@@ -1281,12 +1992,78 @@ async function copyOption() {
                   </button>
                 </div>
               </div>
-              <div class="switch-grid">
-                <label class="switch-control">
-                  <input v-model="styleSettings.showAllLabels" type="checkbox" />
-                  <span aria-hidden="true" />
-                  Все подписи
+              <label class="select-control">
+                <span>Формат значений</span>
+                <select
+                  :value="styleSettings.valueFormat"
+                  @change="styleSettings.valueFormat = ($event.target as HTMLSelectElement).value as ValueFormat"
+                >
+                  <option value="number">Число</option>
+                  <option value="percent">Проценты</option>
+                  <option value="compact">Сокращённый</option>
+                </select>
+              </label>
+              <label class="range-control">
+                <span>Знаков после запятой</span>
+                <input
+                  v-model.number="styleSettings.valueDecimals"
+                  type="range"
+                  min="0"
+                  max="4"
+                />
+                <output>{{ styleSettings.valueDecimals }}</output>
+              </label>
+              <details
+                v-if="['line', 'bar', 'area', 'scatter'].includes(chartType)"
+                class="advanced-settings"
+              >
+                <summary>Поворот и отступы</summary>
+                <label class="range-control">
+                  <span>Поворот X</span>
+                  <input
+                    v-model.number="styleSettings.xAxisLabelRotate"
+                    type="range"
+                    min="-90"
+                    max="90"
+                  />
+                  <output>{{ styleSettings.xAxisLabelRotate }}°</output>
                 </label>
+                <label class="range-control">
+                  <span>Поворот Y</span>
+                  <input
+                    v-model.number="styleSettings.yAxisLabelRotate"
+                    type="range"
+                    min="-90"
+                    max="90"
+                  />
+                  <output>{{ styleSettings.yAxisLabelRotate }}°</output>
+                </label>
+                <label class="range-control">
+                  <span>Отступ X</span>
+                  <input
+                    v-model.number="styleSettings.xAxisLabelMargin"
+                    type="range"
+                    min="0"
+                    max="60"
+                  />
+                  <output>{{ styleSettings.xAxisLabelMargin }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Отступ Y</span>
+                  <input
+                    v-model.number="styleSettings.yAxisLabelMargin"
+                    type="range"
+                    min="0"
+                    max="60"
+                  />
+                  <output>{{ styleSettings.yAxisLabelMargin }} px</output>
+                </label>
+              </details>
+            </section>
+
+            <section class="setting-group" aria-labelledby="legend-title">
+              <h3 id="legend-title">Легенда и подсказки</h3>
+              <div class="switch-grid">
                 <label class="switch-control">
                   <input v-model="styleSettings.showLegend" type="checkbox" />
                   <span aria-hidden="true" />
@@ -1298,6 +2075,86 @@ async function copyOption() {
                   Подсказки
                 </label>
               </div>
+              <label class="select-control">
+                <span>Положение легенды</span>
+                <select
+                  :value="styleSettings.legendPosition"
+                  :disabled="!styleSettings.showLegend"
+                  @change="styleSettings.legendPosition = ($event.target as HTMLSelectElement).value as LegendPosition"
+                >
+                  <option value="bottom">Снизу</option>
+                  <option value="top">Сверху</option>
+                  <option value="right">Справа</option>
+                  <option value="left">Слева</option>
+                </select>
+              </label>
+              <label class="range-control">
+                <span>Размер текста</span>
+                <input
+                  v-model.number="styleSettings.legendFontSize"
+                  :disabled="!styleSettings.showLegend"
+                  type="range"
+                  min="8"
+                  max="30"
+                />
+                <output>{{ styleSettings.legendFontSize }} px</output>
+              </label>
+              <label class="range-control">
+                <span>Размер маркера</span>
+                <input
+                  v-model.number="styleSettings.legendItemSize"
+                  :disabled="!styleSettings.showLegend"
+                  type="range"
+                  min="6"
+                  max="30"
+                />
+                <output>{{ styleSettings.legendItemSize }} px</output>
+              </label>
+              <label class="range-control">
+                <span>Зазор элементов</span>
+                <input
+                  v-model.number="styleSettings.legendGap"
+                  :disabled="!styleSettings.showLegend"
+                  type="range"
+                  min="0"
+                  max="60"
+                />
+                <output>{{ styleSettings.legendGap }} px</output>
+              </label>
+              <details class="advanced-settings">
+                <summary>Оформление tooltip</summary>
+                <div class="color-controls compact-colors">
+                  <label>
+                    <span>Фон</span>
+                    <input
+                      v-model="styleSettings.tooltipBackgroundColor"
+                      type="color"
+                      :disabled="!styleSettings.showTooltip"
+                    />
+                    <code>{{ styleSettings.tooltipBackgroundColor }}</code>
+                  </label>
+                  <label>
+                    <span>Граница</span>
+                    <input
+                      v-model="styleSettings.tooltipBorderColor"
+                      type="color"
+                      :disabled="!styleSettings.showTooltip"
+                    />
+                    <code>{{ styleSettings.tooltipBorderColor }}</code>
+                  </label>
+                </div>
+                <label class="range-control">
+                  <span>Размер текста</span>
+                  <input
+                    v-model.number="styleSettings.tooltipFontSize"
+                    :disabled="!styleSettings.showTooltip"
+                    type="range"
+                    min="8"
+                    max="30"
+                  />
+                  <output>{{ styleSettings.tooltipFontSize }} px</output>
+                </label>
+              </details>
             </section>
 
             <section
@@ -1322,11 +2179,107 @@ async function copyOption() {
                   <span aria-hidden="true" />
                   Засечки
                 </label>
+                <label class="switch-control">
+                  <input v-model="styleSettings.boundaryGap" type="checkbox" />
+                  <span aria-hidden="true" />
+                  Отступ от края
+                </label>
               </div>
+              <details class="advanced-settings">
+                <summary>Диапазон и оформление</summary>
+                <div class="number-grid">
+                  <label>
+                    <span>Минимум Y</span>
+                    <input
+                      :value="styleSettings.yAxisMin ?? ''"
+                      type="number"
+                      placeholder="Авто"
+                      @input="updateNullableStyleNumber($event, 'yAxisMin')"
+                    />
+                  </label>
+                  <label>
+                    <span>Максимум Y</span>
+                    <input
+                      :value="styleSettings.yAxisMax ?? ''"
+                      type="number"
+                      placeholder="Авто"
+                      @input="updateNullableStyleNumber($event, 'yAxisMax')"
+                    />
+                  </label>
+                  <label>
+                    <span>Интервал Y</span>
+                    <input
+                      :value="styleSettings.yAxisInterval ?? ''"
+                      type="number"
+                      min="0"
+                      placeholder="Авто"
+                      @input="updateNullableStyleNumber($event, 'yAxisInterval')"
+                    />
+                  </label>
+                </div>
+                <label class="range-control">
+                  <span>Толщина сетки</span>
+                  <input
+                    v-model.number="styleSettings.gridLineWidth"
+                    type="range"
+                    min="1"
+                    max="8"
+                  />
+                  <output>{{ styleSettings.gridLineWidth }} px</output>
+                </label>
+                <label class="select-control">
+                  <span>Тип линий сетки</span>
+                  <select
+                    :value="styleSettings.gridLineType"
+                    @change="styleSettings.gridLineType = ($event.target as HTMLSelectElement).value as LineStyleType"
+                  >
+                    <option value="solid">Сплошные</option>
+                    <option value="dashed">Штриховые</option>
+                    <option value="dotted">Точки</option>
+                  </select>
+                </label>
+                <div class="color-controls compact-colors">
+                  <label>
+                    <span>Сетка</span>
+                    <input
+                      v-model="styleSettings.gridLineColor"
+                      type="color"
+                    />
+                    <code>{{ styleSettings.gridLineColor }}</code>
+                  </label>
+                  <label>
+                    <span>Оси</span>
+                    <input
+                      v-model="styleSettings.axisLineColor"
+                      type="color"
+                    />
+                    <code>{{ styleSettings.axisLineColor }}</code>
+                  </label>
+                </div>
+              </details>
             </section>
 
             <section class="setting-group" aria-labelledby="colors-title">
               <h3 id="colors-title">Цвета</h3>
+              <div class="palette-presets" aria-label="Готовые палитры">
+                <button
+                  v-for="preset in PALETTE_PRESETS"
+                  :key="preset.id"
+                  type="button"
+                  :class="{ active: selectedPaletteId === preset.id }"
+                  :aria-pressed="selectedPaletteId === preset.id"
+                  @click="applyPalette(preset.id)"
+                >
+                  <span class="palette-preview" aria-hidden="true">
+                    <i
+                      v-for="color in preset.colors.slice(0, 4)"
+                      :key="color"
+                      :style="{ background: color }"
+                    />
+                  </span>
+                  {{ preset.name }}
+                </button>
+              </div>
               <div class="color-controls">
                 <label>
                   <span>Фон</span>
@@ -1345,17 +2298,22 @@ async function copyOption() {
                 </label>
               </div>
               <div class="palette-editor">
-                <label
+                <div
                   v-for="(color, colorIndex) in styleSettings.palette"
                   :key="colorIndex"
                   class="palette-row"
                 >
                   <span>{{ colorIndex + 1 }}</span>
-                  <input
-                    v-model="styleSettings.palette[colorIndex]"
-                    type="color"
-                    :aria-label="`Цвет палитры ${colorIndex + 1}`"
-                  />
+                  <label class="palette-color-input">
+                    <span class="visually-hidden">
+                      Цвет палитры {{ colorIndex + 1 }}
+                    </span>
+                    <input
+                      v-model="styleSettings.palette[colorIndex]"
+                      type="color"
+                      @input="markPaletteCustom"
+                    />
+                  </label>
                   <code>{{ color }}</code>
                   <input
                     v-model.number="styleSettings.paletteOpacities[colorIndex]"
@@ -1363,10 +2321,45 @@ async function copyOption() {
                     min="0"
                     max="100"
                     :aria-label="`Непрозрачность цвета ${colorIndex + 1}`"
+                    @input="markPaletteCustom"
                   />
                   <output>{{ styleSettings.paletteOpacities[colorIndex] }}%</output>
-                </label>
+                  <div class="palette-row-actions">
+                    <button
+                      type="button"
+                      :disabled="colorIndex === 0"
+                      :aria-label="`Поднять цвет ${colorIndex + 1}`"
+                      @click="movePaletteColor(colorIndex, -1)"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="colorIndex === styleSettings.palette.length - 1"
+                      :aria-label="`Опустить цвет ${colorIndex + 1}`"
+                      @click="movePaletteColor(colorIndex, 1)"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="styleSettings.palette.length <= 1"
+                      :aria-label="`Удалить цвет ${colorIndex + 1}`"
+                      @click="removePaletteColor(colorIndex)"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
               </div>
+              <button
+                class="add-palette-color"
+                type="button"
+                :disabled="styleSettings.palette.length >= 12"
+                @click="addPaletteColor"
+              >
+                + Добавить цвет
+              </button>
             </section>
 
             <section class="setting-group" aria-labelledby="motion-title">
@@ -1381,6 +2374,81 @@ async function copyOption() {
                   step="100"
                 />
                 <output>{{ styleSettings.animationDuration }} ms</output>
+              </label>
+              <label class="range-control">
+                <span>Обновление</span>
+                <input
+                  v-model.number="styleSettings.animationUpdateDuration"
+                  type="range"
+                  min="0"
+                  max="3000"
+                  step="100"
+                />
+                <output>{{ styleSettings.animationUpdateDuration }} ms</output>
+              </label>
+              <label class="select-control">
+                <span>Характер движения</span>
+                <select
+                  :value="styleSettings.animationEasing"
+                  @change="styleSettings.animationEasing = ($event.target as HTMLSelectElement).value as AnimationEasing"
+                >
+                  <option value="linear">Линейный</option>
+                  <option value="cubicIn">Разгон</option>
+                  <option value="cubicOut">Торможение</option>
+                  <option value="cubicInOut">Разгон и торможение</option>
+                  <option value="quarticOut">Мягкое торможение</option>
+                  <option value="elasticOut">Пружина</option>
+                </select>
+              </label>
+              <label class="range-control">
+                <span>Внутренний отступ</span>
+                <input
+                  v-model.number="styleSettings.chartPadding"
+                  type="range"
+                  min="8"
+                  max="80"
+                />
+                <output>{{ styleSettings.chartPadding }} px</output>
+              </label>
+            </section>
+
+            <section class="setting-group" aria-labelledby="states-title">
+              <h3 id="states-title">Состояния</h3>
+              <label class="select-control">
+                <span>Фокус при наведении</span>
+                <select
+                  :value="styleSettings.emphasisFocus"
+                  @change="styleSettings.emphasisFocus = ($event.target as HTMLSelectElement).value as EmphasisFocus"
+                >
+                  <option value="series">Серия</option>
+                  <option value="self">Элемент</option>
+                  <option value="none">Без фокуса</option>
+                </select>
+              </label>
+              <label class="switch-control">
+                <input v-model="styleSettings.emphasisScale" type="checkbox" />
+                <span aria-hidden="true" />
+                Увеличивать при наведении
+              </label>
+              <label class="range-control">
+                <span>Прозрачность blur</span>
+                <input
+                  v-model.number="styleSettings.blurOpacity"
+                  type="range"
+                  min="0"
+                  max="100"
+                />
+                <output>{{ styleSettings.blurOpacity }}%</output>
+              </label>
+              <label class="range-control">
+                <span>Граница select</span>
+                <input
+                  v-model.number="styleSettings.selectBorderWidth"
+                  type="range"
+                  min="0"
+                  max="20"
+                />
+                <output>{{ styleSettings.selectBorderWidth }} px</output>
               </label>
             </section>
 
@@ -1506,8 +2574,8 @@ async function copyOption() {
               class="chart"
               :option="option"
               :init-options="{ renderer }"
+              :update-options="{ notMerge: true }"
               :theme="chartTheme === 'dark' ? 'dark' : undefined"
-              :not-merge="true"
               :autoresize="{ throttle: 100 }"
             />
           </div>

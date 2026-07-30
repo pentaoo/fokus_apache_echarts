@@ -5,6 +5,7 @@
   color: #202124;
   background: #f5f6f7;
   font-synthesis: none;
+  overflow-x: clip;
   text-rendering: optimizeLegibility;
 }
 
@@ -14,8 +15,10 @@
 
 body {
   margin: 0;
+  max-width: 100%;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 button,
@@ -102,7 +105,7 @@ h2 {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(390px, 0.86fr) minmax(560px, 1.4fr);
+  grid-template-columns: minmax(390px, 423px) minmax(560px, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -131,9 +134,14 @@ h2 {
 }
 
 .table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  contain: inline-size;
   overflow-x: auto;
   border: 1px solid #d9dcdf;
   border-radius: 4px;
+  overscroll-behavior-inline: contain;
 }
 
 table {
@@ -352,8 +360,8 @@ td input {
 }
 
 .chart-type-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -362,12 +370,12 @@ td input {
   align-items: center;
   justify-content: flex-start;
   gap: 9px;
-  min-height: 46px;
-  padding: 8px 12px;
-  border-color: #dedfe3;
-  border-radius: 7px;
+  min-height: 38px;
+  padding: 7px 13px;
+  border-color: transparent;
+  border-radius: 999px;
   color: #404348;
-  background: #fff;
+  background: #ededf0;
   font-size: 0.76rem;
   text-align: left;
 }
@@ -378,10 +386,10 @@ td input {
 }
 
 .chart-type-grid button.active {
-  border-color: #6f42c1;
-  color: #5525aa;
-  background: #f2ecfc;
-  box-shadow: inset 0 0 0 1px #6f42c1;
+  border-color: #4d0ae2;
+  color: #fff;
+  background: #4d0ae2;
+  box-shadow: none;
   font-weight: 700;
 }
 
@@ -392,9 +400,19 @@ td input {
   flex: 0 0 auto;
   place-items: center;
   border-radius: 5px;
-  color: #6f42c1;
-  background: #f0eafa;
+  color: #4d0ae2;
+  background: transparent;
   font-size: 0.9rem;
+}
+
+.chart-type-grid button.active .chart-type-icon {
+  color: #fff;
+}
+
+.preset-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .random-chart-button {
@@ -404,13 +422,22 @@ td input {
   gap: 8px;
   min-height: 42px;
   margin-top: 2px;
-  border-color: #6f42c1;
-  border-radius: 7px;
+  border-color: #4d0ae2;
+  border-radius: 999px;
   color: #fff;
   background:
     linear-gradient(120deg, #5423ae 0%, #7a48ce 56%, #aa5dd7 100%);
   font-size: 0.76rem;
   font-weight: 700;
+}
+
+.reset-style-button {
+  min-height: 42px;
+  border-color: #d9d9de;
+  border-radius: 999px;
+  color: #555a60;
+  background: #fff;
+  font-size: 0.72rem;
 }
 
 .random-chart-button:hover {
@@ -477,6 +504,57 @@ td input {
   font-size: 0.74rem;
 }
 
+.select-control select:disabled,
+.range-control input:disabled,
+.switch-control input:disabled + span,
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.advanced-settings {
+  min-width: 0;
+  border: 1px solid #e1e1e5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.advanced-settings summary {
+  padding: 10px 12px;
+  color: #555a60;
+  cursor: pointer;
+  font-size: 0.73rem;
+  font-weight: 650;
+}
+
+.advanced-settings[open] summary {
+  border-bottom: 1px solid #ececef;
+}
+
+.advanced-settings > :not(summary) {
+  margin: 10px 12px;
+}
+
+.number-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.number-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #646970;
+  font-size: 0.68rem;
+}
+
+.number-grid input {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.72rem;
+}
+
 .color-controls {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -520,6 +598,48 @@ td input {
   text-overflow: ellipsis;
 }
 
+.compact-colors {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.palette-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.palette-presets button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border-color: transparent;
+  border-radius: 999px;
+  color: #4a4d53;
+  background: #ececef;
+  font-size: 0.7rem;
+}
+
+.palette-presets button.active {
+  border-color: #4d0ae2;
+  color: #fff;
+  background: #4d0ae2;
+}
+
+.palette-preview {
+  display: flex;
+  overflow: hidden;
+  width: 34px;
+  height: 14px;
+  border: 1px solid rgb(255 255 255 / 48%);
+  border-radius: 999px;
+}
+
+.palette-preview i {
+  flex: 1;
+}
+
 .palette-editor {
   display: grid;
   gap: 6px;
@@ -528,7 +648,9 @@ td input {
 
 .palette-row {
   display: grid;
-  grid-template-columns: 18px 30px 64px minmax(60px, 1fr) 42px;
+  grid-template-columns:
+    18px 30px minmax(54px, 64px) minmax(46px, 1fr) 38px
+    auto;
   align-items: center;
   gap: 7px;
   min-width: 0;
@@ -538,6 +660,12 @@ td input {
   color: #767b81;
   background: #fff;
   font-size: 0.67rem;
+}
+
+.palette-color-input {
+  display: block;
+  width: 30px;
+  height: 30px;
 }
 
 .palette-row > span {
@@ -578,6 +706,34 @@ td input {
   font-size: 0.65rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.palette-row-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.palette-row-actions button {
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  height: 24px;
+  padding: 0;
+  border-color: transparent;
+  color: #6b7076;
+  background: transparent;
+  font-size: 0.7rem;
+}
+
+.add-palette-color {
+  justify-self: start;
+  min-height: 34px;
+  border-color: #d7d7dc;
+  border-radius: 999px;
+  color: #4d0ae2;
+  background: #fff;
+  font-size: 0.72rem;
+  font-weight: 650;
 }
 
 .range-control {
@@ -664,6 +820,10 @@ td input {
 .switch-control input:focus-visible + span {
   outline: 2px solid #4b78c2;
   outline-offset: 2px;
+}
+
+.switch-control input:disabled ~ * {
+  opacity: 0.5;
 }
 
 .css-editor {
@@ -1072,10 +1232,43 @@ pre {
   }
 
   .range-control {
-    grid-template-columns: 115px minmax(80px, 1fr) 46px;
+    grid-template-columns: minmax(96px, 0.9fr) minmax(74px, 1fr) 50px;
   }
 
   .switch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setting-group {
+    padding-inline: 14px;
+  }
+
+  .choice-row,
+  .select-control {
+    grid-template-columns: minmax(110px, 0.9fr) minmax(0, 1fr);
+  }
+
+  .number-grid,
+  .color-controls,
+  .compact-colors {
+    grid-template-columns: 1fr;
+  }
+
+  .palette-row {
+    grid-template-columns: 18px 30px minmax(48px, 1fr) 38px;
+  }
+
+  .palette-row input[type="range"] {
+    grid-column: 2 / 5;
+    grid-row: 2;
+  }
+
+  .palette-row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .preset-actions {
     grid-template-columns: 1fr;
   }
 
