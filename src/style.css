@@ -580,6 +580,10 @@ button:disabled {
   font-size: 0.68rem;
 }
 
+.color-controls .hex-color-editor {
+  grid-column: 1 / -1;
+}
+
 .color-controls input[type="color"] {
   width: 30px;
   min-height: 28px;
@@ -649,8 +653,7 @@ button:disabled {
 .palette-row {
   display: grid;
   grid-template-columns:
-    18px 30px minmax(54px, 64px) minmax(46px, 1fr) 38px
-    auto;
+    18px minmax(116px, 0.9fr) minmax(46px, 1fr) 38px auto;
   align-items: center;
   gap: 7px;
   min-width: 0;
@@ -1115,6 +1118,10 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+.standard-background-hex {
+  width: 126px;
+}
+
 .chart-stage {
   width: 100%;
   height: 440px;
@@ -1255,11 +1262,20 @@ pre {
   }
 
   .palette-row {
-    grid-template-columns: 18px 30px minmax(48px, 1fr) 38px;
+    grid-template-columns: 18px minmax(0, 1fr) 38px;
+  }
+
+  .palette-row .hex-color-editor {
+    grid-column: 2 / 4;
   }
 
   .palette-row input[type="range"] {
-    grid-column: 2 / 5;
+    grid-column: 2 / 3;
+    grid-row: 2;
+  }
+
+  .palette-row output {
+    grid-column: 3;
     grid-row: 2;
   }
 

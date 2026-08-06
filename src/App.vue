@@ -15,6 +15,7 @@ import {
   TooltipComponent,
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import HexColorInput from './components/HexColorInput.vue'
 import { applyChartStyle } from './chartStyle'
 import type {
   AnimationEasing,
@@ -1360,19 +1361,17 @@ async function copyOption() {
                 <div class="color-controls compact-colors">
                   <label>
                     <span>Граница</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.barBorderColor"
-                      type="color"
+                      label="Цвет границы столбца"
                     />
-                    <code>{{ styleSettings.barBorderColor }}</code>
                   </label>
                   <label>
                     <span>Фон</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.barBackgroundColor"
-                      type="color"
+                      label="Цвет фона столбца"
                     />
-                    <code>{{ styleSettings.barBackgroundColor }}</code>
                   </label>
                 </div>
               </details>
@@ -1598,7 +1597,7 @@ async function copyOption() {
                 >
                   <option value="outside">Снаружи</option>
                   <option value="inside">Внутри</option>
-                  <option value="center">В центре</option>
+                  <option value="center">В центре сектора</option>
                 </select>
               </label>
               <label class="select-control">
@@ -1645,11 +1644,10 @@ async function copyOption() {
                 <div class="color-controls compact-colors">
                   <label>
                     <span>Граница</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.pieBorderColor"
-                      type="color"
+                      label="Цвет границы сектора"
                     />
-                    <code>{{ styleSettings.pieBorderColor }}</code>
                   </label>
                 </div>
               </details>
@@ -1759,11 +1757,10 @@ async function copyOption() {
                 <div class="color-controls compact-colors">
                   <label>
                     <span>Граница</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.scatterBorderColor"
-                      type="color"
+                      label="Цвет границы точки"
                     />
-                    <code>{{ styleSettings.scatterBorderColor }}</code>
                   </label>
                 </div>
               </details>
@@ -2126,21 +2123,19 @@ async function copyOption() {
                 <div class="color-controls compact-colors">
                   <label>
                     <span>Фон</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.tooltipBackgroundColor"
-                      type="color"
                       :disabled="!styleSettings.showTooltip"
+                      label="Цвет фона tooltip"
                     />
-                    <code>{{ styleSettings.tooltipBackgroundColor }}</code>
                   </label>
                   <label>
                     <span>Граница</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.tooltipBorderColor"
-                      type="color"
                       :disabled="!styleSettings.showTooltip"
+                      label="Цвет границы tooltip"
                     />
-                    <code>{{ styleSettings.tooltipBorderColor }}</code>
                   </label>
                 </div>
                 <label class="range-control">
@@ -2241,19 +2236,17 @@ async function copyOption() {
                 <div class="color-controls compact-colors">
                   <label>
                     <span>Сетка</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.gridLineColor"
-                      type="color"
+                      label="Цвет линий сетки"
                     />
-                    <code>{{ styleSettings.gridLineColor }}</code>
                   </label>
                   <label>
                     <span>Оси</span>
-                    <input
+                    <HexColorInput
                       v-model="styleSettings.axisLineColor"
-                      type="color"
+                      label="Цвет линий осей"
                     />
-                    <code>{{ styleSettings.axisLineColor }}</code>
                   </label>
                 </div>
               </details>
@@ -2283,38 +2276,38 @@ async function copyOption() {
               <div class="color-controls">
                 <label>
                   <span>Фон</span>
-                  <input v-model="styleSettings.backgroundColor" type="color" />
-                  <code>{{ styleSettings.backgroundColor }}</code>
+                  <HexColorInput
+                    v-model="styleSettings.backgroundColor"
+                    label="Цвет фона графика"
+                  />
                 </label>
                 <label>
                   <span>Текст</span>
-                  <input v-model="styleSettings.textColor" type="color" />
-                  <code>{{ styleSettings.textColor }}</code>
+                  <HexColorInput
+                    v-model="styleSettings.textColor"
+                    label="Основной цвет текста"
+                  />
                 </label>
                 <label>
                   <span>Вторичный</span>
-                  <input v-model="styleSettings.mutedTextColor" type="color" />
-                  <code>{{ styleSettings.mutedTextColor }}</code>
+                  <HexColorInput
+                    v-model="styleSettings.mutedTextColor"
+                    label="Вторичный цвет текста"
+                  />
                 </label>
               </div>
               <div class="palette-editor">
                 <div
-                  v-for="(color, colorIndex) in styleSettings.palette"
+                  v-for="(_, colorIndex) in styleSettings.palette"
                   :key="colorIndex"
                   class="palette-row"
                 >
                   <span>{{ colorIndex + 1 }}</span>
-                  <label class="palette-color-input">
-                    <span class="visually-hidden">
-                      Цвет палитры {{ colorIndex + 1 }}
-                    </span>
-                    <input
-                      v-model="styleSettings.palette[colorIndex]"
-                      type="color"
-                      @input="markPaletteCustom"
-                    />
-                  </label>
-                  <code>{{ color }}</code>
+                  <HexColorInput
+                    v-model="styleSettings.palette[colorIndex]"
+                    :label="`Цвет палитры ${colorIndex + 1}`"
+                    @update:model-value="markPaletteCustom"
+                  />
                   <input
                     v-model.number="styleSettings.paletteOpacities[colorIndex]"
                     type="range"
@@ -2562,6 +2555,12 @@ async function copyOption() {
               </label>
             </div>
             <span class="background-name">{{ selectedBackground.name }}</span>
+            <HexColorInput
+              v-model="customBackground"
+              class="standard-background-hex"
+              label="Свой цвет фона"
+              @update:model-value="selectedBackgroundId = 'custom'"
+            />
           </fieldset>
 
           <div

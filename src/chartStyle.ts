@@ -774,6 +774,7 @@ function stylePieSeries(
       ? sourceInnerRadius
       : config.pieInnerRadius
   const color = getPaletteColor(config, seriesIndex)
+  const labelInSectorCenter = config.pieLabelPosition === 'center'
 
   return {
     ...series,
@@ -797,15 +798,23 @@ function stylePieSeries(
     label: {
       ...series.label,
       show: config.showPieLabels,
-      position: config.pieLabelPosition,
-      align: config.labelAlignment,
+      position: labelInSectorCenter ? 'inside' : config.pieLabelPosition,
+      rotate: labelInSectorCenter ? 'tangential' : 0,
+      align: labelInSectorCenter ? 'center' : config.labelAlignment,
+      verticalAlign: labelInSectorCenter
+        ? 'middle'
+        : series.label?.verticalAlign,
       color: config.textColor,
       fontFamily: config.fontFamily,
-      fontSize: config.xAxisLabelSize,
+      fontSize: labelInSectorCenter
+        ? config.valueLabelSize
+        : config.xAxisLabelSize,
       fontWeight: config.fontWeight,
       ...(series.label?.formatter === undefined
         ? {
-            formatter: pieFormatter(config),
+            formatter: labelInSectorCenter
+              ? valueFormatter(config)
+              : pieFormatter(config),
           }
         : {}),
     },
