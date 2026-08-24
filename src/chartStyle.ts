@@ -6,6 +6,7 @@
  */
 export type EChartsOption = Record<string, any>
 export type BarArrangement = 'grouped' | 'stacked' | 'horizontal'
+export type BarOrder = 'normal' | 'reverse' | 'value'
 export type LabelAlignment = 'left' | 'center' | 'right'
 export type BarValuePosition = 'inside' | 'top'
 export type BarCategoryPosition = 'axis' | 'inside'
@@ -43,6 +44,7 @@ export interface ChartStyleConfig {
   fontWeight?: number
   chartPadding?: number
 
+  showTitle?: boolean
   showLegend?: boolean
   legendPosition?: LegendPosition
   legendFontSize?: number
@@ -65,6 +67,11 @@ export interface ChartStyleConfig {
   xAxisLabelSize?: number
   yAxisLabelSize?: number
   valueLabelSize?: number
+  axisLabelWeight?: number
+  valueLabelWeight?: number
+  categoryLabelColor?: string
+  valueAxisLabelColor?: string
+  pieLabelColor?: string
   xAxisLabelRotate?: number
   yAxisLabelRotate?: number
   xAxisLabelMargin?: number
@@ -85,6 +92,8 @@ export interface ChartStyleConfig {
   yAxisInterval?: number | null
 
   barArrangement?: BarArrangement
+  barHorizontal?: boolean
+  barOrder?: BarOrder
   barGapPercent?: number
   barSeriesGapPercent?: number
   barRadius?: number
@@ -180,10 +189,11 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   mutedTextColor: '#B8B8C2',
   palette: DEFAULT_PALETTE,
   paletteOpacities: DEFAULT_PALETTE.map(() => 100),
-  fontFamily: 'Inter, Arial, sans-serif',
+  fontFamily: '"ALS Hauss", Arial, Helvetica, sans-serif',
   fontWeight: 700,
   chartPadding: 28,
 
+  showTitle: true,
   showLegend: true,
   legendPosition: 'bottom',
   legendFontSize: 13,
@@ -206,6 +216,11 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   xAxisLabelSize: 14,
   yAxisLabelSize: 12,
   valueLabelSize: 22,
+  axisLabelWeight: 500,
+  valueLabelWeight: 700,
+  categoryLabelColor: '#FFFFFF',
+  valueAxisLabelColor: '#B8B8C2',
+  pieLabelColor: '#FFFFFF',
   xAxisLabelRotate: 0,
   yAxisLabelRotate: 0,
   xAxisLabelMargin: 18,
@@ -226,6 +241,8 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   yAxisInterval: null,
 
   barArrangement: 'grouped',
+  barHorizontal: false,
+  barOrder: 'normal',
   barGapPercent: 21,
   barSeriesGapPercent: 30,
   barRadius: 100,
@@ -473,6 +490,7 @@ function styleAxis(
   dimension: 'x' | 'y',
 ) {
   const isCategory = axis.type === 'category' || Array.isArray(axis.data)
+  const categoryInside = isCategory && config.barCategoryPosition === 'inside'
   const showLabels =
     dimension === 'x' ? config.showXAxisLabels : config.showYAxisLabels
   const labelSize =
@@ -481,6 +499,12 @@ function styleAxis(
     dimension === 'x' ? config.xAxisLabelRotate : config.yAxisLabelRotate
   const labelMargin =
     dimension === 'x' ? config.xAxisLabelMargin : config.yAxisLabelMargin
+  const horizontalCategoryAlign =
+    config.labelAlignment === 'left'
+      ? 'right'
+      : config.labelAlignment === 'right'
+        ? 'left'
+        : 'center'
   const valueRange =
     dimension === 'y' && !isCategory
       ? {
@@ -494,8 +518,17 @@ function styleAxis(
 
   return {
     ...axis,
+    ...(categoryInside ? { z: Math.max(10, axis.z ?? 0) } : {}),
     ...valueRange,
-    ...(isCategory ? { boundaryGap: config.boundaryGap } : {}),
+    ...(isCategory
+      ? {
+          boundaryGap: config.boundaryGap,
+          inverse:
+            config.barHorizontal || config.barArrangement === 'horizontal'
+              ? config.barOrder !== 'reverse'
+              : config.barOrder === 'reverse',
+        }
+      : {}),
     axisLine: {
       ...axis.axisLine,
       show: config.showAxisLines,
@@ -511,12 +544,24 @@ function styleAxis(
     axisLabel: {
       ...axis.axisLabel,
       show: showLabels,
-      inside: isCategory && config.barCategoryPosition === 'inside',
-      align: dimension === 'x' ? config.labelAlignment : axis.axisLabel?.align,
-      color: isCategory ? config.textColor : config.mutedTextColor,
+      inside: categoryInside,
+      align: categoryInside
+        ? 'left'
+        : isCategory
+          ? dimension === 'x'
+            ? horizontalCategoryAlign
+            : config.labelAlignment
+          : dimension === 'x'
+            ? 'center'
+            : 'right',
+      verticalAlign: categoryInside ? 'middle' : axis.axisLabel?.verticalAlign,
+      padding: categoryInside ? [0, 0, 0, 8] : axis.axisLabel?.padding,
+      color: isCategory
+        ? config.categoryLabelColor
+        : config.valueAxisLabelColor,
       fontFamily: config.fontFamily,
       fontSize: labelSize,
-      fontWeight: isCategory ? config.fontWeight : 500,
+      fontWeight: config.axisLabelWeight,
       margin: labelMargin,
       rotate: labelRotate,
       interval: 0,
@@ -575,7 +620,8 @@ function styleBarSeries(
   seriesIndex: number,
   config: ResolvedChartStyle,
 ) {
-  const horizontal = config.barArrangement === 'horizontal'
+  const horizontal =
+    config.barHorizontal || config.barArrangement === 'horizontal'
   const { stack: _sourceStack, ...seriesWithoutStack } = series
   const base =
     config.barArrangement === 'stacked'
@@ -615,7 +661,7 @@ function styleBarSeries(
             ...source.label,
             color:
               config.barValuePosition === 'inside'
-                ? config.textColor
+                ? '#FFFFFF'
                 : itemColor,
           },
         }
@@ -629,6 +675,18 @@ function styleBarSeries(
       : [radius, radius, 0, 0]
     : radius
   const color = getPaletteColor(config, seriesIndex)
+  const labelInside = config.barValuePosition === 'inside'
+  const insidePosition = horizontal
+    ? config.labelAlignment === 'left'
+      ? 'insideLeft'
+      : config.labelAlignment === 'right'
+        ? 'insideRight'
+        : 'inside'
+    : config.labelAlignment === 'left'
+      ? 'insideTopLeft'
+      : config.labelAlignment === 'right'
+        ? 'insideTopRight'
+        : 'insideTop'
 
   return {
     ...base,
@@ -638,6 +696,7 @@ function styleBarSeries(
     barMinHeight: config.barMinHeight,
     barCategoryGap: `${config.barGapPercent}%`,
     barGap: `${config.barSeriesGapPercent}%`,
+    realtimeSort: horizontal && config.barOrder === 'value',
     showBackground: config.showBarBackground,
     backgroundStyle: {
       ...series.backgroundStyle,
@@ -654,20 +713,21 @@ function styleBarSeries(
     label: {
       ...series.label,
       show: config.showValueLabels,
-      position:
-        config.barValuePosition === 'inside'
-          ? horizontal
-            ? 'insideRight'
-            : 'insideTop'
-          : horizontal
-            ? 'right'
-            : 'top',
+      position: labelInside
+        ? insidePosition
+        : horizontal
+          ? 'right'
+          : 'top',
       distance: 10,
-      align: config.labelAlignment,
-      color,
+      align: labelInside
+        ? config.labelAlignment
+        : horizontal
+          ? 'left'
+          : 'center',
+      color: labelInside ? '#FFFFFF' : color,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
-      fontWeight: config.fontWeight,
+      fontWeight: config.valueLabelWeight,
       ...(series.label?.formatter === undefined
         ? { formatter: valueFormatter(config) }
         : {}),
@@ -717,10 +777,11 @@ function styleLineSeries(
       ...series.label,
       show: config.showValueLabels,
       position: 'top',
+      align: config.labelAlignment,
       color: config.textColor,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
-      fontWeight: config.fontWeight,
+      fontWeight: config.valueLabelWeight,
       ...(series.label?.formatter === undefined
         ? { formatter: valueFormatter(config) }
         : {}),
@@ -728,10 +789,11 @@ function styleLineSeries(
     endLabel: {
       ...series.endLabel,
       show: config.showEndLabel,
+      align: config.labelAlignment,
       color: config.textColor,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
-      fontWeight: config.fontWeight,
+      fontWeight: config.valueLabelWeight,
       ...(series.endLabel?.formatter === undefined
         ? { formatter: valueFormatter(config) }
         : {}),
@@ -804,12 +866,12 @@ function stylePieSeries(
       verticalAlign: labelInSectorCenter
         ? 'middle'
         : series.label?.verticalAlign,
-      color: config.textColor,
+      color: config.pieLabelColor,
       fontFamily: config.fontFamily,
       fontSize: labelInSectorCenter
         ? config.valueLabelSize
         : config.xAxisLabelSize,
-      fontWeight: config.fontWeight,
+      fontWeight: config.valueLabelWeight,
       ...(series.label?.formatter === undefined
         ? {
             formatter: labelInSectorCenter
@@ -868,6 +930,7 @@ function styleScatterSeries(
       ...series.label,
       show: config.showScatterLabels || config.showValueLabels,
       position: 'top',
+      align: config.labelAlignment,
       color: config.textColor,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
@@ -913,6 +976,7 @@ function styleRadarSeries(
     label: {
       ...series.label,
       show: config.showValueLabels,
+      align: config.labelAlignment,
       color: config.textColor,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
@@ -985,7 +1049,8 @@ export function applyChartStyle(
   const seriesSource = asArray(option.series)
   const hasBarSeries = seriesSource.some((series) => series.type === 'bar')
   const horizontal =
-    hasBarSeries && config.barArrangement === 'horizontal'
+    hasBarSeries &&
+    (config.barHorizontal || config.barArrangement === 'horizontal')
   const xAxisSource = horizontal ? option.yAxis : option.xAxis
   const yAxisSource = horizontal ? option.xAxis : option.yAxis
   const xAxes = asArray(xAxisSource).map((axis) =>
@@ -1010,6 +1075,26 @@ export function applyChartStyle(
     xAxisSource !== undefined || yAxisSource !== undefined
   const palette =
     config.palette.length > 0 ? config.palette : DEFAULT_PALETTE
+  const titleSource = asArray(option.title)
+  const titles = titleSource.map((title) => ({
+    ...title,
+    show: config.showTitle,
+    left: title.left ?? config.labelAlignment,
+    textStyle: {
+      ...title.textStyle,
+      color: config.textColor,
+      fontFamily: config.fontFamily,
+      fontWeight: config.fontWeight,
+    },
+  }))
+  const chartGrid = gridLayout(config)
+  if (
+    config.showTitle &&
+    titleSource.length > 0 &&
+    typeof chartGrid.top === 'number'
+  ) {
+    chartGrid.top += 40
+  }
 
   return {
     ...option,
@@ -1023,6 +1108,7 @@ export function applyChartStyle(
       fontFamily: config.fontFamily,
       fontWeight: config.fontWeight,
     },
+    title: restoreShape(option.title, titles),
     animationDuration: config.animationDuration,
     animationDurationUpdate: config.animationUpdateDuration,
     animationEasing: config.animationEasing,
@@ -1030,7 +1116,7 @@ export function applyChartStyle(
     grid: hasCartesianAxes
       ? {
           ...option.grid,
-          ...gridLayout(config),
+          ...chartGrid,
         }
       : option.grid,
     legend: option.legend

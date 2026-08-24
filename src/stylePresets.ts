@@ -28,6 +28,16 @@ export interface PalettePreset {
   colors: string[]
 }
 
+export type NewUiChartKind = 'columns' | 'rows' | 'doughnut' | 'pie' | 'line'
+
+export const CHALK_PALETTE = [
+  '#71c1e3',
+  '#82bb89',
+  '#f9ea6e',
+  '#f9b77d',
+  '#fca4b5',
+]
+
 export const PALETTE_PRESETS: PalettePreset[] = [
   {
     id: 'fokus',
@@ -191,5 +201,66 @@ export function createStylePreset(type: ChartType): ResolvedChartStyle {
     ...TYPE_OVERRIDES[type],
     palette: [...defaults.palette],
     paletteOpacities: [...defaults.paletteOpacities],
+  }
+}
+
+export function createNewUiStylePreset(
+  kind: NewUiChartKind,
+): ResolvedChartStyle {
+  const type: ChartType =
+    kind === 'columns' || kind === 'rows' ? 'bar' : kind
+  const preset = createStylePreset(type)
+  const isRows = kind === 'rows'
+  const isPie = kind === 'pie' || kind === 'doughnut'
+
+  return {
+    ...preset,
+    backgroundColor: 'transparent',
+    textColor: '#000000',
+    mutedTextColor: '#000000',
+    palette: [...CHALK_PALETTE],
+    paletteOpacities: CHALK_PALETTE.map(() => 100),
+    fontFamily: '"ALS Hauss", Arial, Helvetica, sans-serif',
+    fontWeight: 500,
+    axisLabelWeight: 500,
+    valueLabelWeight: 900,
+    categoryLabelColor: isRows ? '#00000033' : '#000000',
+    valueAxisLabelColor: '#000000',
+    pieLabelColor: '#ffffff',
+    chartPadding: 0,
+    showLegend: false,
+    showGridLines: false,
+    showAxisLines: false,
+    showAxisTicks: false,
+    xAxisLabelSize: 16,
+    yAxisLabelSize: isRows ? 32 : 16,
+    valueLabelSize: isRows ? 32 : 24,
+    xAxisLabelMargin: 12,
+    yAxisLabelMargin: isRows ? -8 : 14,
+    showValueLabels: kind === 'columns' || kind === 'rows',
+    labelAlignment: isRows ? 'left' : 'center',
+    barHorizontal: isRows,
+    barArrangement: 'grouped',
+    barGapPercent: 10,
+    barSeriesGapPercent: 0,
+    barRadius: 120,
+    barRoundPeaks: true,
+    barMaxWidth: isRows ? 76 : 64,
+    barValuePosition: 'top',
+    barCategoryPosition: isRows ? 'inside' : 'axis',
+    colorBarsByData: true,
+    commonBarColor: false,
+    gradientBars: false,
+    pieInnerRadius: kind === 'doughnut' ? 56 : 0,
+    pieOuterRadius: kind === 'doughnut' ? 80 : 88,
+    piePadAngle: kind === 'doughnut' ? 2 : 0,
+    pieStartAngle: 0,
+    pieClockwise: true,
+    pieLabelPosition: 'center',
+    showPieLabels: isPie,
+    showPieLabelLines: false,
+    pieBorderRadius: kind === 'doughnut' ? 8 : 0,
+    pieBorderWidth: 0,
+    pieBorderColor: 'transparent',
   }
 }

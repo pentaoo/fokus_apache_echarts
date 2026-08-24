@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
 import {
@@ -12,10 +12,13 @@ import {
 import {
   GridComponent,
   LegendComponent,
+  TitleComponent,
   TooltipComponent,
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import HexColorInput from './components/HexColorInput.vue'
+import NewDesignPanel from './components/NewDesignPanel.vue'
+import NewUiAppShell from './components/NewUiAppShell.vue'
 import { applyChartStyle } from './chartStyle'
 import type {
   AnimationEasing,
@@ -36,8 +39,10 @@ import type {
 } from './chartStyle'
 import {
   PALETTE_PRESETS,
+  createNewUiStylePreset,
   createStylePreset,
   type ChartType,
+  type NewUiChartKind,
   type PalettePresetId,
 } from './stylePresets'
 
@@ -51,12 +56,14 @@ use([
   ScatterChart,
   GridComponent,
   LegendComponent,
+  TitleComponent,
   TooltipComponent,
 ])
 
 type Renderer = 'canvas' | 'svg'
 type ChartTheme = 'light' | 'dark'
 type StyleMode = 'default' | 'poster'
+type UiDesignMode = 'classic' | 'new'
 type ChartOption = Record<string, unknown>
 
 interface BackgroundPreset {
@@ -73,10 +80,9 @@ interface DataSeries {
 
 type StyleSettings = ResolvedChartStyle
 
-const initialCategories = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май']
+const initialCategories = ['Апрель', 'Май', 'Июнь', 'Июль', 'Август']
 const initialSeries = [
-  { id: 1, name: 'Серия 1', values: [120, 180, 150, 230, 190] },
-  { id: 2, name: 'Серия 2', values: [80, 140, 210, 170, 250] },
+  { id: 1, name: 'Средняя температура', values: [12, 19, 22, 24, 22] },
 ]
 
 const chartTypes: Array<{ value: ChartType; label: string }> = [
@@ -112,20 +118,50 @@ const backgroundPresets: BackgroundPreset[] = [
 
 const categories = ref([...initialCategories])
 const dataSeries = ref<DataSeries[]>(cloneInitialSeries())
-const chartType = ref<ChartType>('line')
+const monoPalette = PALETTE_PRESETS.find((preset) => preset.id === 'mono')!.colors.slice(0, 5)
+
+const chartType = ref<ChartType>('bar')
 const renderer = ref<Renderer>('canvas')
 const chartTheme = ref<ChartTheme>('light')
 const styleMode = ref<StyleMode>('poster')
+const uiDesignMode = ref<UiDesignMode>('new')
+const isNewUi = computed(() => uiDesignMode.value === 'new')
+const chartTitle = ref('Средняя температура')
 const selectedBackgroundId = ref('white')
 const customBackground = ref('#b42318')
 const selectedPieSeriesId = ref(1)
-const nextSeriesId = ref(3)
+const nextSeriesId = ref(2)
 const copied = ref(false)
 const isEditingCss = ref(false)
 const cssCode = ref('')
-const selectedPaletteId = ref<PalettePresetId>('fokus')
-const styleSettings = ref<StyleSettings>(createStylePreset('line'))
+const selectedPaletteId = ref<PalettePresetId | 'chalk'>('chalk')
+const initialStyle = createNewUiStylePreset('columns')
+const styleSettings = ref<StyleSettings>(initialStyle)
 const styleSnapshots = new Map<ChartType, StyleSettings>()
+const newUiStyleSnapshots = new Map<NewUiChartKind, StyleSettings>()
+const chartStageElement = ref<HTMLElement | null>(null)
+const chartStageSize = ref({ width: 366, height: 444 })
+let chartStageObserver: ResizeObserver | null = null
+
+watch(
+  chartStageElement,
+  (element, previousElement) => {
+    if (!chartStageObserver) {
+      chartStageObserver = new ResizeObserver(([entry]) => {
+        if (!entry) return
+        chartStageSize.value = {
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        }
+      })
+    }
+    if (previousElement) chartStageObserver.unobserve(previousElement)
+    if (element) chartStageObserver.observe(element)
+  },
+  { flush: 'post' },
+)
+
+onBeforeUnmount(() => chartStageObserver?.disconnect())
 
 function cloneStyleSettings(settings: StyleSettings): StyleSettings {
   return {
@@ -138,22 +174,66 @@ function cloneStyleSettings(settings: StyleSettings): StyleSettings {
 function selectChartType(nextType: ChartType) {
   if (nextType === chartType.value) return
 
+  const palette = [...styleSettings.value.palette]
+  const paletteOpacities = [...styleSettings.value.paletteOpacities]
   styleSnapshots.set(
     chartType.value,
     cloneStyleSettings(styleSettings.value),
   )
   chartType.value = nextType
-  styleSettings.value = styleSnapshots.has(nextType)
+  const nextSettings = styleSnapshots.has(nextType)
     ? cloneStyleSettings(styleSnapshots.get(nextType)!)
     : createStylePreset(nextType)
-  selectedPaletteId.value = 'custom'
+  styleSettings.value = {
+    ...nextSettings,
+    palette,
+    paletteOpacities,
+  }
+}
+
+function activeNewUiChartKind(): NewUiChartKind {
+  if (chartType.value === 'bar') {
+    return styleSettings.value.barHorizontal ? 'rows' : 'columns'
+  }
+  if (chartType.value === 'pie' || chartType.value === 'doughnut') {
+    return chartType.value
+  }
+  return 'line'
+}
+
+function selectNewUiChartKind(kind: NewUiChartKind) {
+  const currentKind = activeNewUiChartKind()
+  if (currentKind === kind) return
+
+  const palette = [...styleSettings.value.palette]
+  const paletteOpacities = [...styleSettings.value.paletteOpacities]
+  newUiStyleSnapshots.set(currentKind, cloneStyleSettings(styleSettings.value))
+  chartType.value =
+    kind === 'columns' || kind === 'rows' ? 'bar' : kind
+  const hasSnapshot = newUiStyleSnapshots.has(kind)
+  const nextSettings = hasSnapshot
+    ? cloneStyleSettings(newUiStyleSnapshots.get(kind)!)
+    : createNewUiStylePreset(kind)
+  styleSettings.value = {
+    ...nextSettings,
+    palette,
+    paletteOpacities,
+  }
+}
+
+function selectNewUiChartType(nextType: ChartType) {
+  if (nextType === 'line' || nextType === 'pie' || nextType === 'doughnut') {
+    selectNewUiChartKind(nextType)
+  }
 }
 
 function resetCurrentStyle() {
   const next = createStylePreset(chartType.value)
+  next.palette = [...monoPalette]
+  next.paletteOpacities = monoPalette.map(() => 100)
   styleSettings.value = next
   styleSnapshots.set(chartType.value, cloneStyleSettings(next))
-  selectedPaletteId.value = 'fokus'
+  selectedPaletteId.value = 'mono'
 }
 
 function applyPalette(presetId: Exclude<PalettePresetId, 'custom'>) {
@@ -166,6 +246,35 @@ function applyPalette(presetId: Exclude<PalettePresetId, 'custom'>) {
     paletteOpacities: preset.colors.map(() => 100),
   }
   selectedPaletteId.value = preset.id
+}
+
+function applyNewPalette(
+  presetId: Exclude<PalettePresetId, 'custom'> | 'chalk',
+  colors: string[],
+) {
+  styleSettings.value = {
+    ...styleSettings.value,
+    palette: [...colors],
+    paletteOpacities: colors.map(() => 100),
+  }
+  selectedPaletteId.value = presetId
+}
+
+function selectHorizontalBar() {
+  selectNewUiChartKind('rows')
+}
+
+function selectColumnBar() {
+  selectNewUiChartKind('columns')
+}
+
+function resetNewDesign() {
+  chartType.value = 'bar'
+  styleSettings.value = createNewUiStylePreset('columns')
+  newUiStyleSnapshots.clear()
+  chartTitle.value = 'Средняя температура'
+  selectedPaletteId.value = 'chalk'
+  styleMode.value = 'poster'
 }
 
 function markPaletteCustom() {
@@ -241,6 +350,7 @@ function formatCss(settings: StyleSettings) {
   --chart-animation-easing: ${settings.animationEasing};
 
   /* Легенда и tooltip */
+  --chart-show-title: ${Number(settings.showTitle)};
   --chart-show-legend: ${Number(settings.showLegend)};
   --chart-legend-position: ${settings.legendPosition};
   --chart-legend-font-size: ${settings.legendFontSize}px;
@@ -259,6 +369,11 @@ function formatCss(settings: StyleSettings) {
   --chart-x-axis-label-size: ${settings.xAxisLabelSize}px;
   --chart-y-axis-label-size: ${settings.yAxisLabelSize}px;
   --chart-value-label-size: ${settings.valueLabelSize}px;
+  --chart-axis-label-weight: ${settings.axisLabelWeight};
+  --chart-value-label-weight: ${settings.valueLabelWeight};
+  --chart-category-label-color: ${settings.categoryLabelColor};
+  --chart-value-axis-label-color: ${settings.valueAxisLabelColor};
+  --chart-pie-label-color: ${settings.pieLabelColor};
   --chart-x-axis-label-rotate: ${settings.xAxisLabelRotate}deg;
   --chart-y-axis-label-rotate: ${settings.yAxisLabelRotate}deg;
   --chart-x-axis-label-margin: ${settings.xAxisLabelMargin}px;
@@ -281,6 +396,8 @@ function formatCss(settings: StyleSettings) {
 
   /* Столбцы */
   --chart-bar-arrangement: ${settings.barArrangement};
+  --chart-bar-horizontal: ${Number(settings.barHorizontal)};
+  --chart-bar-order: ${settings.barOrder};
   --chart-bar-gap: ${settings.barGapPercent}%;
   --chart-bar-series-gap: ${settings.barSeriesGapPercent}%;
   --chart-bar-radius: ${settings.barRadius}px;
@@ -367,8 +484,8 @@ ${palette}
 
 function normalizeHexColor(value: string) {
   const color = value.trim()
-  if (/^#[\da-f]{6}$/i.test(color)) return color.toLowerCase()
-  if (/^#[\da-f]{3}$/i.test(color)) {
+  if (/^#[\da-f]{6}([\da-f]{2})?$/i.test(color)) return color.toLowerCase()
+  if (/^#[\da-f]{3,4}$/i.test(color)) {
     return `#${color
       .slice(1)
       .split('')
@@ -430,6 +547,9 @@ function applyCssCode(value: string) {
     ['bar-background-color', 'barBackgroundColor'],
     ['pie-border-color', 'pieBorderColor'],
     ['scatter-border-color', 'scatterBorderColor'],
+    ['category-label-color', 'categoryLabelColor'],
+    ['value-axis-label-color', 'valueAxisLabelColor'],
+    ['pie-label-color', 'pieLabelColor'],
   ]
 
   colorVariables.forEach(([variable, key]) => {
@@ -446,7 +566,7 @@ function applyCssCode(value: string) {
     [string, keyof StyleSettings, number, number]
   > = [
     ['font-weight', 'fontWeight', 400, 900],
-    ['padding', 'chartPadding', 8, 80],
+    ['padding', 'chartPadding', 0, 80],
     ['animation-duration', 'animationDuration', 0, 3000],
     ['animation-update-duration', 'animationUpdateDuration', 0, 3000],
     ['legend-font-size', 'legendFontSize', 8, 30],
@@ -456,10 +576,12 @@ function applyCssCode(value: string) {
     ['x-axis-label-size', 'xAxisLabelSize', 8, 40],
     ['y-axis-label-size', 'yAxisLabelSize', 8, 40],
     ['value-label-size', 'valueLabelSize', 10, 48],
+    ['axis-label-weight', 'axisLabelWeight', 400, 900],
+    ['value-label-weight', 'valueLabelWeight', 400, 900],
     ['x-axis-label-rotate', 'xAxisLabelRotate', -90, 90],
     ['y-axis-label-rotate', 'yAxisLabelRotate', -90, 90],
     ['x-axis-label-margin', 'xAxisLabelMargin', 0, 60],
-    ['y-axis-label-margin', 'yAxisLabelMargin', 0, 60],
+    ['y-axis-label-margin', 'yAxisLabelMargin', -60, 60],
     ['value-decimals', 'valueDecimals', 0, 4],
     ['grid-line-width', 'gridLineWidth', 1, 8],
     ['bar-gap', 'barGapPercent', 0, 100],
@@ -526,6 +648,7 @@ function applyCssCode(value: string) {
   })
 
   const booleanVariables: Array<[string, keyof StyleSettings]> = [
+    ['show-title', 'showTitle'],
     ['show-legend', 'showLegend'],
     ['show-tooltip', 'showTooltip'],
     ['show-x-axis-labels', 'showXAxisLabels'],
@@ -536,6 +659,7 @@ function applyCssCode(value: string) {
     ['show-axis-ticks', 'showAxisTicks'],
     ['boundary-gap', 'boundaryGap'],
     ['bar-round-peaks', 'barRoundPeaks'],
+    ['bar-horizontal', 'barHorizontal'],
     ['common-bar-color', 'commonBarColor'],
     ['gradient-bars', 'gradientBars'],
     ['color-bars-by-data', 'colorBarsByData'],
@@ -578,6 +702,7 @@ function applyCssCode(value: string) {
       'barArrangement',
       ['grouped', 'stacked', 'horizontal'],
     ],
+    ['bar-order', 'barOrder', ['normal', 'reverse', 'value']],
     ['bar-value-position', 'barValuePosition', ['inside', 'top']],
     ['bar-category-position', 'barCategoryPosition', ['axis', 'inside']],
     ['line-type', 'lineType', ['solid', 'dashed', 'dotted']],
@@ -729,6 +854,7 @@ function randomizeChartStyle() {
       'center',
       'right',
     ]),
+    showTitle: randomBoolean(0.88),
     showLegend: randomBoolean(0.72),
     legendPosition: randomChoice<LegendPosition>([
       'top',
@@ -843,7 +969,7 @@ function resetData() {
   categories.value = [...initialCategories]
   dataSeries.value = cloneInitialSeries()
   selectedPieSeriesId.value = 1
-  nextSeriesId.value = 3
+  nextSeriesId.value = 2
 }
 
 watch(
@@ -891,9 +1017,19 @@ const chartStageStyle = computed((): Record<string, string> => {
 })
 
 const rawOption = computed<ChartOption>(() => {
+  const title = chartTitle.value.trim()
+    ? {
+        title: {
+          text: chartTitle.value.trim(),
+          left: styleSettings.value.labelAlignment,
+        },
+      }
+    : {}
+
   if (chartType.value === 'pie' || chartType.value === 'doughnut') {
     if (!selectedPieSeries.value) {
       return {
+        ...title,
         backgroundColor: 'transparent',
         tooltip: { trigger: 'item' },
         legend: {},
@@ -902,6 +1038,7 @@ const rawOption = computed<ChartOption>(() => {
     }
 
     return {
+      ...title,
       backgroundColor: 'transparent',
       tooltip: { trigger: 'item' },
       legend: {},
@@ -935,6 +1072,7 @@ const rawOption = computed<ChartOption>(() => {
     })
 
     return {
+      ...title,
       backgroundColor: 'transparent',
       tooltip: {},
       legend: {},
@@ -953,6 +1091,7 @@ const rawOption = computed<ChartOption>(() => {
 
   if (chartType.value === 'scatter') {
     return {
+      ...title,
       backgroundColor: 'transparent',
       tooltip: { trigger: 'item' },
       legend: {},
@@ -969,6 +1108,7 @@ const rawOption = computed<ChartOption>(() => {
   const seriesType = chartType.value === 'bar' ? 'bar' : 'line'
 
   return {
+    ...title,
     backgroundColor: 'transparent',
     tooltip: { trigger: 'axis' },
     legend: {},
@@ -995,6 +1135,104 @@ const option = computed<ChartOption>(() => {
   return styleMode.value === 'poster'
     ? applyChartStyle(rawOption.value, settingsSnapshot)
     : rawOption.value
+})
+
+const newUiChartStageStyle = computed((): Record<string, string> => ({
+  ...chartStageStyle.value,
+  '--chart-background': 'transparent',
+  background: 'transparent',
+  backgroundColor: 'transparent',
+}))
+
+const newUiChartScale = computed(() => {
+  const kind = activeNewUiChartKind()
+  const circular = kind === 'pie' || kind === 'doughnut'
+  const baseWidth = circular ? 320 : 366
+  const baseHeight = circular ? 320 : 444
+  const scale = Math.min(
+    chartStageSize.value.width / baseWidth,
+    chartStageSize.value.height / baseHeight,
+  )
+  return Math.min(1.35, Math.max(0.65, scale || 1))
+})
+
+const newUiOption = computed<ChartOption>(() => {
+  const settingsSnapshot = JSON.parse(styleRevision.value) as StyleSettings
+  const scale = newUiChartScale.value
+  const kind = activeNewUiChartKind()
+  const styled = applyChartStyle(rawOption.value, {
+    ...settingsSnapshot,
+    backgroundColor: 'transparent',
+    textColor: '#000000',
+    mutedTextColor: '#000000',
+    xAxisLabelSize: Math.round(settingsSnapshot.xAxisLabelSize * scale),
+    yAxisLabelSize: Math.round(settingsSnapshot.yAxisLabelSize * scale),
+    valueLabelSize: Math.round(settingsSnapshot.valueLabelSize * scale),
+    xAxisLabelMargin: Math.round(settingsSnapshot.xAxisLabelMargin * scale),
+    yAxisLabelMargin: Math.round(settingsSnapshot.yAxisLabelMargin * scale),
+    barMaxWidth: Math.round(settingsSnapshot.barMaxWidth * scale),
+  })
+
+  if (kind === 'columns' || kind === 'rows') {
+    const valueAxisKey = kind === 'rows' ? 'xAxis' : 'yAxis'
+    const source = styled[valueAxisKey]
+    const axes = (Array.isArray(source) ? source : [source]).map((axis) => ({
+      ...(axis ?? {}),
+      min: 0,
+      max: ({ max }: { max: number }) =>
+        Math.max(10, Math.ceil(max / 10) * 10),
+      splitNumber: 3,
+    }))
+    styled[valueAxisKey] = Array.isArray(source) ? axes : axes[0]
+    styled.grid = {
+      ...(styled.grid ?? {}),
+      right: kind === 'rows' ? Math.round(54 * scale) : 0,
+    }
+  }
+
+  if (kind === 'pie' || kind === 'doughnut') {
+    const titleReserve =
+      settingsSnapshot.showTitle && chartTitle.value.trim()
+        ? Math.round(58 * scale)
+        : 0
+    const availableHeight = Math.max(
+      120,
+      chartStageSize.value.height - titleReserve,
+    )
+    const outerRadius = Math.max(
+      48,
+      Math.min(chartStageSize.value.width, availableHeight) * 0.4,
+    )
+    const innerRatio =
+      settingsSnapshot.pieOuterRadius > 0
+        ? settingsSnapshot.pieInnerRadius / settingsSnapshot.pieOuterRadius
+        : 0
+    const centerY = titleReserve + availableHeight / 2
+    const sourceSeries = Array.isArray(styled.series)
+      ? styled.series
+      : [styled.series]
+    const circularSeries = sourceSeries.map((series) => ({
+      ...(series ?? {}),
+      center: ['50%', centerY],
+      radius: [outerRadius * innerRatio, outerRadius],
+    }))
+    styled.series = Array.isArray(styled.series)
+      ? circularSeries
+      : circularSeries[0]
+  }
+
+  if (styled.title && !Array.isArray(styled.title)) {
+    styled.title = {
+      ...styled.title,
+      textStyle: {
+        ...(styled.title.textStyle ?? {}),
+        fontSize: Math.round(24 * scale),
+        fontWeight: 900,
+      },
+    }
+  }
+
+  return styled
 })
 
 type OptionFunction = {
@@ -1037,14 +1275,76 @@ async function copyOption() {
 </script>
 
 <template>
-  <main class="app-shell">
+  <NewUiAppShell
+    v-if="isNewUi"
+    @show-classic="uiDesignMode = 'classic'"
+    @randomize="randomizeChartStyle"
+  >
+    <template #settings>
+      <NewDesignPanel
+        :settings="styleSettings"
+        :chart-type="chartType"
+        :chart-title="chartTitle"
+        :selected-palette-id="selectedPaletteId"
+        @update:chart-title="chartTitle = $event"
+        @select-chart-type="selectNewUiChartType"
+        @select-columns-bar="selectColumnBar"
+        @select-horizontal-bar="selectHorizontalBar"
+        @apply-palette="applyNewPalette"
+        @mark-palette-custom="markPaletteCustom"
+        @randomize="randomizeChartStyle"
+        @clear="resetNewDesign"
+        @close="uiDesignMode = 'classic'"
+      />
+    </template>
+
+    <template #chart>
+      <div
+        ref="chartStageElement"
+        class="chart-stage chart-poster new-ui-chart-stage"
+        :style="newUiChartStageStyle"
+      >
+        <VChart
+          :key="`new-${renderer}-${chartTheme}-${styleMode}`"
+          class="chart"
+          :option="newUiOption"
+          :init-options="{ renderer }"
+          :update-options="{ notMerge: true }"
+          :theme="chartTheme === 'dark' ? 'dark' : undefined"
+          :autoresize="{ throttle: 100 }"
+        />
+      </div>
+    </template>
+  </NewUiAppShell>
+
+  <main v-else class="app-shell">
     <header class="page-header">
       <div>
         <h1>Дефолтные графики Apache ECharts</h1>
       </div>
-      <button class="secondary-button" type="button" @click="resetData">
-        Сбросить данные
-      </button>
+      <div class="header-actions">
+        <div class="ui-design-switch" aria-label="Вид интерфейса">
+          <button
+            type="button"
+            :class="{ active: uiDesignMode === 'classic' }"
+            :aria-pressed="uiDesignMode === 'classic'"
+            @click="uiDesignMode = 'classic'"
+          >
+            Текущий UI
+          </button>
+          <button
+            type="button"
+            :class="{ active: uiDesignMode === 'new' }"
+            :aria-pressed="uiDesignMode === 'new'"
+            @click="uiDesignMode = 'new'; styleMode = 'poster'"
+          >
+            Новый UI
+          </button>
+        </div>
+        <button class="secondary-button" type="button" @click="resetData">
+          Сбросить данные
+        </button>
+      </div>
     </header>
 
     <div class="workspace">
@@ -1133,7 +1433,11 @@ async function copyOption() {
           </div>
         </section>
 
-        <section class="panel style-panel" aria-labelledby="style-panel-title">
+        <section
+          v-if="uiDesignMode === 'classic'"
+          class="panel style-panel"
+          aria-labelledby="style-panel-title"
+        >
           <header class="style-panel-header">
             <div>
               <span class="panel-kicker">Оформление</span>
@@ -2473,6 +2777,23 @@ async function copyOption() {
             </button>
           </div>
         </section>
+
+        <NewDesignPanel
+          v-else
+          :settings="styleSettings"
+          :chart-type="chartType"
+          :chart-title="chartTitle"
+          :selected-palette-id="selectedPaletteId"
+          @update:chart-title="chartTitle = $event"
+          @select-chart-type="selectNewUiChartType"
+          @select-columns-bar="selectColumnBar"
+          @select-horizontal-bar="selectHorizontalBar"
+          @apply-palette="applyNewPalette"
+          @mark-palette-custom="markPaletteCustom"
+          @randomize="randomizeChartStyle"
+          @clear="resetNewDesign"
+          @close="uiDesignMode = 'classic'"
+        />
       </div>
 
       <section class="chart-column" aria-labelledby="chart-title">
@@ -2483,7 +2804,11 @@ async function copyOption() {
             <div class="display-controls">
               <label class="renderer-control">
                 Стиль
-                <select v-model="styleMode">
+                <select
+                  v-model="styleMode"
+                  :disabled="uiDesignMode === 'new'"
+                  :title="uiDesignMode === 'new' ? 'Новый интерфейс использует постерный режим' : undefined"
+                >
                   <option value="default">ECharts по умолчанию</option>
                   <option value="poster">Постерный</option>
                 </select>

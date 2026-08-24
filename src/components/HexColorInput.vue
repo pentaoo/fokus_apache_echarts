@@ -94,7 +94,7 @@ watch(color, (nextColor) => {
   min-height: 28px;
   height: 28px;
   padding: 4px 6px;
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: "ALS Hauss", Arial, Helvetica, sans-serif;
   font-size: 0.68rem;
   text-transform: uppercase;
 }
