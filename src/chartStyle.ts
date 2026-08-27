@@ -4,6 +4,8 @@
  * Функция не зависит от Vue, не мутирует исходный option и использует только
  * стандартные свойства Apache ECharts 6.
  */
+import { format as echartsFormat } from 'echarts/core'
+
 export type EChartsOption = Record<string, any>
 export type BarArrangement = 'grouped' | 'stacked' | 'horizontal'
 export type BarOrder = 'normal' | 'reverse' | 'value'
@@ -11,7 +13,8 @@ export type LabelAlignment = 'left' | 'center' | 'right'
 export type BarValuePosition = 'inside' | 'top'
 export type BarCategoryPosition = 'axis' | 'inside'
 export type LineStep = 'none' | 'start' | 'middle' | 'end'
-export type LineStyleType = 'solid' | 'dashed' | 'dotted'
+export type LineShape = 'straight' | 'smooth' | 'step'
+export type LineStyleType = 'solid' | 'dashed' | 'dotted' | 'dashDotted'
 export type PieRoseType = 'none' | 'radius' | 'area'
 export type PieLabelPosition = 'outside' | 'inside' | 'center'
 export type LegendPosition = 'top' | 'bottom' | 'left' | 'right'
@@ -59,6 +62,7 @@ export interface ChartStyleConfig {
   animationDuration?: number
   animationUpdateDuration?: number
   animationEasing?: AnimationEasing
+  presentationMode?: boolean
 
   showXAxisLabels?: boolean
   showYAxisLabels?: boolean
@@ -72,6 +76,7 @@ export interface ChartStyleConfig {
   categoryLabelColor?: string
   valueAxisLabelColor?: string
   pieLabelColor?: string
+  pieLabelSize?: number
   xAxisLabelRotate?: number
   yAxisLabelRotate?: number
   xAxisLabelMargin?: number
@@ -115,13 +120,15 @@ export interface ChartStyleConfig {
   lineWidth?: number
   lineOpacity?: number
   lineType?: LineStyleType
+  showLines?: boolean
+  lineShape?: LineShape
   smoothLines?: boolean
   showLineSymbols?: boolean
   lineSymbolSize?: number
   lineSymbol?: SymbolShape
-  connectNulls?: boolean
   lineStep?: LineStep
   areaOpacity?: number
+  showLineArea?: boolean
   lineStacked?: boolean
   showEndLabel?: boolean
 
@@ -132,6 +139,7 @@ export interface ChartStyleConfig {
   pieEndAngle?: number
   pieClockwise?: boolean
   pieRoseType?: PieRoseType
+  showPiePercentages?: boolean
   showPieLabels?: boolean
   showPieLabelLines?: boolean
   pieLabelPosition?: PieLabelPosition
@@ -171,6 +179,40 @@ export interface ChartStyleConfig {
 
 export type ResolvedChartStyle = Required<ChartStyleConfig>
 
+export const MIN_LINE_WIDTH_PX = 1
+export const MAX_LINE_WIDTH_PX = 120
+export const MIN_PIE_RING_THICKNESS_PX = 32
+export const MAX_PIE_RING_THICKNESS_PERCENT = 99
+
+export function getPieThicknessPercent(
+  innerRadius: number,
+  outerRadius: number,
+) {
+  if (!Number.isFinite(outerRadius) || outerRadius <= 0) return 100
+  const safeInnerRadius = Math.min(
+    outerRadius,
+    Math.max(0, Number.isFinite(innerRadius) ? innerRadius : 0),
+  )
+  return ((outerRadius - safeInnerRadius) / outerRadius) * 100
+}
+
+export function getPieInnerRadius(
+  outerRadius: number,
+  thicknessPercent: number,
+) {
+  const safeOuterRadius = Math.max(0, outerRadius)
+  const safeThickness = Math.min(100, Math.max(0, thicknessPercent))
+  return safeOuterRadius * (1 - safeThickness / 100)
+}
+
+export function getMinimumPieThicknessPercent(
+  outerRadiusPx: number,
+  minimumThicknessPx = MIN_PIE_RING_THICKNESS_PX,
+) {
+  if (!Number.isFinite(outerRadiusPx) || outerRadiusPx <= 0) return 100
+  return Math.min(100, Math.ceil((minimumThicknessPx / outerRadiusPx) * 100))
+}
+
 export const DEFAULT_PALETTE = [
   '#4D0AE2',
   '#6E32E8',
@@ -208,6 +250,7 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   animationDuration: 700,
   animationUpdateDuration: 400,
   animationEasing: 'cubicOut',
+  presentationMode: false,
 
   showXAxisLabels: true,
   showYAxisLabels: true,
@@ -221,6 +264,7 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   categoryLabelColor: '#FFFFFF',
   valueAxisLabelColor: '#B8B8C2',
   pieLabelColor: '#FFFFFF',
+  pieLabelSize: 14,
   xAxisLabelRotate: 0,
   yAxisLabelRotate: 0,
   xAxisLabelMargin: 18,
@@ -264,13 +308,15 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   lineWidth: 6,
   lineOpacity: 100,
   lineType: 'solid',
+  showLines: true,
+  lineShape: 'smooth',
   smoothLines: true,
   showLineSymbols: false,
   lineSymbolSize: 10,
   lineSymbol: 'circle',
-  connectNulls: false,
   lineStep: 'none',
   areaOpacity: 24,
+  showLineArea: false,
   lineStacked: false,
   showEndLabel: false,
 
@@ -281,6 +327,7 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   pieEndAngle: 360,
   pieClockwise: true,
   pieRoseType: 'none',
+  showPiePercentages: false,
   showPieLabels: true,
   showPieLabelLines: true,
   pieLabelPosition: 'outside',
@@ -355,6 +402,35 @@ function hexToRgba(hex: string, opacity: number) {
   return `rgba(${red}, ${green}, ${blue}, ${opacity / 100})`
 }
 
+function darkenHexColor(hex: string, percentage: number) {
+  const normalized = hex.trim().replace('#', '')
+  const expanded =
+    normalized.length === 3
+      ? normalized
+          .split('')
+          .map((character) => character.repeat(2))
+          .join('')
+      : normalized
+
+  if (!/^[\da-f]{6}$/i.test(expanded)) return hex
+
+  const factor = 1 - Math.min(90, Math.max(0, percentage)) / 100
+  const value = Number.parseInt(expanded, 16)
+  const channels = [
+    (value >> 16) & 255,
+    (value >> 8) & 255,
+    value & 255,
+  ]
+
+  return `#${channels
+    .map((channel) => Math.round(channel * factor).toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
+function seriesDarkening(seriesIndex: number, seriesCount: number) {
+  return seriesCount > 1 ? Math.min(seriesIndex * 10, 90) : 0
+}
+
 function makeGradient(color: string, opacity: number, horizontal: boolean) {
   const transparent = hexToRgba(color, Math.max(8, opacity * 0.28))
   const solid = hexToRgba(color, opacity)
@@ -372,14 +448,18 @@ function makeGradient(color: string, opacity: number, horizontal: boolean) {
   }
 }
 
-function getPaletteColor(config: ResolvedChartStyle, index: number) {
+function getPaletteColor(
+  config: ResolvedChartStyle,
+  index: number,
+  darkenBy = 0,
+) {
   const palette = config.palette.length > 0 ? config.palette : DEFAULT_PALETTE
   const paletteIndex = index % palette.length
   const opacity =
     config.paletteOpacities[paletteIndex] ??
     config.paletteOpacities[0] ??
     100
-  return hexToRgba(palette[paletteIndex], opacity)
+  return hexToRgba(darkenHexColor(palette[paletteIndex], darkenBy), opacity)
 }
 
 function formatNumber(value: unknown, config: ResolvedChartStyle) {
@@ -484,6 +564,21 @@ function pieFormatter(config: ResolvedChartStyle) {
   )
 }
 
+function piePercentageFormatter() {
+  const formatter = (params: { percent?: unknown }) => {
+    const percentage = Number(params.percent)
+    return Number.isFinite(percentage) ? String(Math.round(percentage)) : ''
+  }
+
+  return attachFormatterSource(
+    formatter,
+    `(params) => {
+  const percentage = Number(params.percent);
+  return Number.isFinite(percentage) ? String(Math.round(percentage)) : "";
+}`,
+  )
+}
+
 function styleAxis(
   axis: EChartsOption,
   config: ResolvedChartStyle,
@@ -524,9 +619,7 @@ function styleAxis(
       ? {
           boundaryGap: config.boundaryGap,
           inverse:
-            config.barHorizontal || config.barArrangement === 'horizontal'
-              ? config.barOrder !== 'reverse'
-              : config.barOrder === 'reverse',
+            config.barHorizontal || config.barArrangement === 'horizontal',
         }
       : {}),
     axisLine: {
@@ -587,6 +680,26 @@ function seriesStates(
   color: string,
   config: ResolvedChartStyle,
 ) {
+  if (config.presentationMode) {
+    return {
+      silent: true,
+      emphasis: {
+        ...series.emphasis,
+        disabled: true,
+        focus: 'none',
+        scale: false,
+      },
+      blur: {
+        ...series.blur,
+        disabled: true,
+      },
+      select: {
+        ...series.select,
+        disabled: true,
+      },
+    }
+  }
+
   return {
     emphasis: {
       ...series.emphasis,
@@ -615,9 +728,101 @@ function seriesStates(
   }
 }
 
+function lineDashType(type: LineStyleType) {
+  return type === 'dashDotted' ? [12, 6, 2, 6] : type
+}
+
+function minimumBarWidthForValues(
+  series: EChartsOption,
+  config: ResolvedChartStyle,
+) {
+  if (!config.showValueLabels || !Array.isArray(series.data)) return 0
+
+  const font = `${config.valueLabelWeight} ${config.valueLabelSize}px ${config.fontFamily}`
+  const widestValue = series.data.reduce((maximum: number, item: unknown) => {
+    const value = barDatumNumber(item)
+    if (value === null) return maximum
+    const text = formatNumber(value, config)
+    return Math.max(maximum, echartsFormat.getTextRect(text, font).width)
+  }, 0)
+
+  return widestValue > 0 ? Math.ceil(widestValue) + 8 : 0
+}
+
+interface StackedBarBounds {
+  positiveStart: Array<number | undefined>
+  positiveEnd: Array<number | undefined>
+  negativeStart: Array<number | undefined>
+  negativeEnd: Array<number | undefined>
+}
+
+function getStackedBarBounds(series: EChartsOption[]): StackedBarBounds {
+  const bounds: StackedBarBounds = {
+    positiveStart: [],
+    positiveEnd: [],
+    negativeStart: [],
+    negativeEnd: [],
+  }
+
+  series.forEach((item, seriesIndex) => {
+    if (item.type !== 'bar' || !Array.isArray(item.data)) return
+
+    item.data.forEach((datum: unknown, dataIndex: number) => {
+      const value = barDatumNumber(datum)
+      if (value === null || value === 0) return
+
+      const start = value > 0 ? bounds.positiveStart : bounds.negativeStart
+      const end = value > 0 ? bounds.positiveEnd : bounds.negativeEnd
+      start[dataIndex] ??= seriesIndex
+      end[dataIndex] = seriesIndex
+    })
+  })
+
+  return bounds
+}
+
+function stackedBarBorderRadius(
+  value: number | null,
+  dataIndex: number,
+  seriesIndex: number,
+  bounds: StackedBarBounds,
+  horizontal: boolean,
+  roundPeaksOnly: boolean,
+  radius: number,
+) {
+  if (value === null || value === 0 || radius <= 0) return 0
+
+  const positive = value > 0
+  const start = positive ? bounds.positiveStart : bounds.negativeStart
+  const end = positive ? bounds.positiveEnd : bounds.negativeEnd
+  const isStart = start[dataIndex] === seriesIndex
+  const isEnd = end[dataIndex] === seriesIndex
+  const corners: [number, number, number, number] = [0, 0, 0, 0]
+
+  if (horizontal) {
+    if (positive) {
+      if (!roundPeaksOnly && isStart) corners[0] = corners[3] = radius
+      if (isEnd) corners[1] = corners[2] = radius
+    } else {
+      if (!roundPeaksOnly && isStart) corners[1] = corners[2] = radius
+      if (isEnd) corners[0] = corners[3] = radius
+    }
+  } else if (positive) {
+    if (isEnd) corners[0] = corners[1] = radius
+    if (!roundPeaksOnly && isStart) corners[2] = corners[3] = radius
+  } else {
+    if (!roundPeaksOnly && isStart) corners[0] = corners[1] = radius
+    if (isEnd) corners[2] = corners[3] = radius
+  }
+
+  return corners
+}
+
 function styleBarSeries(
   series: EChartsOption,
   seriesIndex: number,
+  seriesCount: number,
+  stackedBounds: StackedBarBounds | null,
   config: ResolvedChartStyle,
 ) {
   const horizontal =
@@ -627,6 +832,13 @@ function styleBarSeries(
     config.barArrangement === 'stacked'
       ? { ...series, stack: '__poster_total__' }
       : seriesWithoutStack
+  const darkenBy = seriesDarkening(seriesIndex, seriesCount)
+  const radius = config.barRadius
+  const borderRadius = config.barRoundPeaks
+    ? horizontal
+      ? [0, radius, radius, 0]
+      : [radius, radius, 0, 0]
+    : radius
 
   const styledData = Array.isArray(series.data)
     ? series.data.map((item: any, dataIndex: number) => {
@@ -635,11 +847,14 @@ function styleBarSeries(
           : config.colorBarsByData
             ? dataIndex
             : seriesIndex
-        const itemColor = getPaletteColor(config, paletteIndex)
+        const itemColor = getPaletteColor(config, paletteIndex, darkenBy)
         const palette = config.palette.length > 0
           ? config.palette
           : DEFAULT_PALETTE
-        const rawColor = palette[paletteIndex % palette.length]
+        const rawColor = darkenHexColor(
+          palette[paletteIndex % palette.length],
+          darkenBy,
+        )
         const opacity =
           config.paletteOpacities[
             paletteIndex % config.paletteOpacities.length
@@ -648,6 +863,17 @@ function styleBarSeries(
           item !== null && typeof item === 'object' && !Array.isArray(item)
             ? item
             : { value: item }
+        const itemBorderRadius = stackedBounds
+          ? stackedBarBorderRadius(
+              barDatumNumber(source),
+              dataIndex,
+              seriesIndex,
+              stackedBounds,
+              horizontal,
+              config.barRoundPeaks,
+              radius,
+            )
+          : borderRadius
 
         return {
           ...source,
@@ -656,6 +882,7 @@ function styleBarSeries(
             color: config.gradientBars
               ? makeGradient(rawColor, opacity, horizontal)
               : itemColor,
+            borderRadius: itemBorderRadius,
           },
           label: {
             ...source.label,
@@ -668,14 +895,15 @@ function styleBarSeries(
       })
     : series.data
 
-  const radius = config.barRadius
-  const borderRadius = config.barRoundPeaks
-    ? horizontal
-      ? [0, radius, radius, 0]
-      : [radius, radius, 0, 0]
-    : radius
-  const color = getPaletteColor(config, seriesIndex)
+  const seriesPaletteIndex =
+    config.commonBarColor || config.colorBarsByData ? 0 : seriesIndex
+  const color = getPaletteColor(config, seriesPaletteIndex, darkenBy)
   const labelInside = config.barValuePosition === 'inside'
+  const minimumBarWidth = horizontal
+    ? 0
+    : minimumBarWidthForValues(series, config)
+  const sourceMinimumBarWidth =
+    typeof series.barMinWidth === 'number' ? series.barMinWidth : 0
   const insidePosition = horizontal
     ? config.labelAlignment === 'left'
       ? 'insideLeft'
@@ -693,10 +921,13 @@ function styleBarSeries(
     data: styledData,
     ...(config.barWidth > 0 ? { barWidth: config.barWidth } : {}),
     barMaxWidth: config.barMaxWidth,
+    ...(!horizontal && minimumBarWidth > 0
+      ? { barMinWidth: Math.max(sourceMinimumBarWidth, minimumBarWidth) }
+      : {}),
     barMinHeight: config.barMinHeight,
     barCategoryGap: `${config.barGapPercent}%`,
     barGap: `${config.barSeriesGapPercent}%`,
-    realtimeSort: horizontal && config.barOrder === 'value',
+    realtimeSort: false,
     showBackground: config.showBarBackground,
     backgroundStyle: {
       ...series.backgroundStyle,
@@ -705,8 +936,9 @@ function styleBarSeries(
     },
     itemStyle: {
       ...series.itemStyle,
+      color,
       opacity: config.barOpacity / 100,
-      borderRadius,
+      borderRadius: stackedBounds ? 0 : borderRadius,
       borderColor: config.barBorderColor,
       borderWidth: config.barBorderWidth,
     },
@@ -718,7 +950,12 @@ function styleBarSeries(
         : horizontal
           ? 'right'
           : 'top',
-      distance: 10,
+      distance: horizontal ? 10 : labelInside ? 0 : 6,
+      padding: horizontal
+        ? series.label?.padding
+        : labelInside
+          ? [6, 4, 0, 4]
+          : [0, 4, 0, 4],
       align: labelInside
         ? config.labelAlignment
         : horizontal
@@ -743,10 +980,33 @@ function styleBarSeries(
 function styleLineSeries(
   series: EChartsOption,
   seriesIndex: number,
+  seriesCount: number,
   config: ResolvedChartStyle,
 ) {
-  const color = getPaletteColor(config, seriesIndex)
-  const hasArea = series.areaStyle !== undefined
+  const color = getPaletteColor(
+    config,
+    seriesIndex,
+    seriesDarkening(seriesIndex, seriesCount),
+  )
+  const hasArea = config.presentationMode
+    ? config.showLineArea
+    : series.areaStyle !== undefined
+  const showLine = config.showLines
+  const showPoints = config.showLineSymbols
+  const smooth = config.presentationMode
+    ? config.lineShape === 'smooth'
+      ? 0.5
+      : false
+    : config.smoothLines
+      ? 0.8
+      : false
+  const step = config.presentationMode
+    ? config.lineShape === 'step'
+      ? 'middle'
+      : false
+    : config.lineStep === 'none'
+      ? false
+      : config.lineStep
   const { stack: _sourceStack, ...seriesWithoutStack } = series
   const base = config.lineStacked
     ? { ...series, stack: '__poster_line_total__' }
@@ -754,20 +1014,22 @@ function styleLineSeries(
 
   return {
     ...base,
-    smooth: config.smoothLines,
-    showSymbol: config.showLineSymbols,
+    smooth,
+    ...(smooth ? { smoothMonotone: 'x' } : {}),
+    showSymbol: showPoints,
     symbol: config.lineSymbol,
     symbolSize: config.lineSymbolSize,
-    connectNulls: config.connectNulls,
-    step: config.lineStep === 'none' ? false : config.lineStep,
+    step,
     lineStyle: {
       ...series.lineStyle,
-      width: config.lineWidth,
-      opacity: config.lineOpacity / 100,
-      type: config.lineType,
+      width: showLine ? config.lineWidth : 0,
+      opacity: showLine ? config.lineOpacity / 100 : 0,
+      type: lineDashType(config.lineType),
       cap: 'round',
       join: 'round',
-      color: series.lineStyle?.color ?? color,
+      color: config.presentationMode
+        ? color
+        : series.lineStyle?.color ?? color,
     },
     itemStyle: {
       ...series.itemStyle,
@@ -775,7 +1037,7 @@ function styleLineSeries(
     },
     label: {
       ...series.label,
-      show: config.showValueLabels,
+      show: config.presentationMode ? false : config.showValueLabels,
       position: 'top',
       align: config.labelAlignment,
       color: config.textColor,
@@ -788,7 +1050,7 @@ function styleLineSeries(
     },
     endLabel: {
       ...series.endLabel,
-      show: config.showEndLabel,
+      show: config.presentationMode ? false : config.showEndLabel,
       align: config.labelAlignment,
       color: config.textColor,
       fontFamily: config.fontFamily,
@@ -831,15 +1093,30 @@ function stylePieSeries(
     Array.isArray(series.radius) && typeof series.radius[0] === 'string'
       ? Number.parseFloat(series.radius[0])
       : 0
-  const innerRadius =
-    config.pieInnerRadius === 0 && sourceInnerRadius > 0
+  const configuredInnerRadius =
+    !config.presentationMode &&
+    config.pieInnerRadius === 0 &&
+    sourceInnerRadius > 0
       ? sourceInnerRadius
       : config.pieInnerRadius
+  const innerRadius = Math.min(
+    Math.max(0, configuredInnerRadius),
+    Math.max(0, config.pieOuterRadius - 1),
+  )
   const color = getPaletteColor(config, seriesIndex)
   const labelInSectorCenter = config.pieLabelPosition === 'center'
+  const showNames = config.showPieLabels
+  const data = Array.isArray(series.data)
+    ? series.data.map((item: unknown) =>
+        item !== null && typeof item === 'object' && !Array.isArray(item)
+          ? { ...item }
+          : item,
+      )
+    : series.data
 
   return {
     ...series,
+    data,
     center: pieCenter(config),
     radius: [`${innerRadius}%`, `${config.pieOuterRadius}%`],
     padAngle: config.piePadAngle,
@@ -848,7 +1125,8 @@ function stylePieSeries(
     clockwise: config.pieClockwise,
     roseType: config.pieRoseType === 'none' ? false : config.pieRoseType,
     minAngle: config.pieMinAngle,
-    selectedMode: config.pieSelectedMode ? 'single' : false,
+    selectedMode:
+      config.presentationMode || !config.pieSelectedMode ? false : 'single',
     selectedOffset: config.pieSelectedOffset,
     avoidLabelOverlap: true,
     itemStyle: {
@@ -859,8 +1137,12 @@ function stylePieSeries(
     },
     label: {
       ...series.label,
-      show: config.showPieLabels,
-      position: labelInSectorCenter ? 'inside' : config.pieLabelPosition,
+      show: showNames,
+      position: config.presentationMode
+        ? 'outside'
+        : labelInSectorCenter
+          ? 'inside'
+          : config.pieLabelPosition,
       rotate: labelInSectorCenter ? 'tangential' : 0,
       align: labelInSectorCenter ? 'center' : config.labelAlignment,
       verticalAlign: labelInSectorCenter
@@ -868,13 +1150,15 @@ function stylePieSeries(
         : series.label?.verticalAlign,
       color: config.pieLabelColor,
       fontFamily: config.fontFamily,
-      fontSize: labelInSectorCenter
-        ? config.valueLabelSize
-        : config.xAxisLabelSize,
-      fontWeight: config.valueLabelWeight,
+      fontSize: config.pieLabelSize,
+      fontWeight: labelInSectorCenter
+        ? config.valueLabelWeight
+        : config.fontWeight,
       ...(series.label?.formatter === undefined
         ? {
-            formatter: labelInSectorCenter
+            formatter: config.presentationMode
+              ? '{b}'
+              : labelInSectorCenter
               ? valueFormatter(config)
               : pieFormatter(config),
           }
@@ -883,9 +1167,9 @@ function stylePieSeries(
     labelLine: {
       ...series.labelLine,
       show:
-        config.showPieLabels &&
+        showNames &&
         config.showPieLabelLines &&
-        config.pieLabelPosition === 'outside',
+        (config.presentationMode || config.pieLabelPosition === 'outside'),
       length: 14,
       length2: 10,
       smooth: 0.2,
@@ -903,12 +1187,88 @@ function stylePieSeries(
   }
 }
 
+function piePercentageSeries(
+  series: EChartsOption,
+  config: ResolvedChartStyle,
+): EChartsOption {
+  const percentageFormatter = piePercentageFormatter()
+  const data = Array.isArray(series.data)
+    ? series.data.map((item: unknown) => {
+        const source =
+          item !== null && typeof item === 'object' && !Array.isArray(item)
+            ? item as EChartsOption
+            : { value: item }
+
+        return {
+          ...source,
+          itemStyle: {
+            ...source.itemStyle,
+            color: 'rgba(0, 0, 0, 0)',
+            opacity: 1,
+            borderWidth: 0,
+          },
+          label: {
+            ...source.label,
+            show: true,
+            position: 'inside',
+            rotate: 'tangential',
+            formatter: percentageFormatter,
+            color: '#FFFFFF',
+            fontFamily: config.fontFamily,
+            fontSize: Math.min(24, config.valueLabelSize),
+            fontWeight: config.valueLabelWeight,
+          },
+        }
+      })
+    : series.data
+
+  return {
+    ...series,
+    id: `${String(series.id ?? series.name ?? 'pie')}-percentages`,
+    name: '',
+    data,
+    z: Number(series.z ?? 2) + 1,
+    silent: true,
+    animation: false,
+    animationDuration: 0,
+    legendHoverLink: false,
+    selectedMode: false,
+    tooltip: { show: false },
+    itemStyle: {
+      ...series.itemStyle,
+      color: 'rgba(0, 0, 0, 0)',
+      opacity: 1,
+      borderWidth: 0,
+    },
+    label: {
+      show: true,
+      position: 'inside',
+      rotate: 'tangential',
+      formatter: percentageFormatter,
+      color: '#FFFFFF',
+      fontFamily: config.fontFamily,
+      fontSize: Math.min(24, config.valueLabelSize),
+      fontWeight: config.valueLabelWeight,
+    },
+    labelLine: { show: false },
+    labelLayout: { hideOverlap: true },
+    emphasis: { disabled: true, scale: false },
+    blur: { disabled: true },
+    select: { disabled: true },
+  }
+}
+
 function styleScatterSeries(
   series: EChartsOption,
   seriesIndex: number,
+  seriesCount: number,
   config: ResolvedChartStyle,
 ) {
-  const color = getPaletteColor(config, seriesIndex)
+  const color = getPaletteColor(
+    config,
+    seriesIndex,
+    seriesDarkening(seriesIndex, seriesCount),
+  )
 
   return {
     ...series,
@@ -953,9 +1313,40 @@ function styleRadarSeries(
   config: ResolvedChartStyle,
 ) {
   const color = getPaletteColor(config, seriesIndex)
+  const dataCount = Array.isArray(series.data) ? series.data.length : 0
+  const styledData = Array.isArray(series.data)
+    ? series.data.map((item: unknown, dataIndex: number) => {
+        const source =
+          item !== null && typeof item === 'object' && !Array.isArray(item)
+            ? item as EChartsOption
+            : { value: item }
+        const itemColor = getPaletteColor(
+          config,
+          dataIndex,
+          seriesDarkening(dataIndex, dataCount),
+        )
+
+        return {
+          ...source,
+          lineStyle: {
+            ...source.lineStyle,
+            color: itemColor,
+          },
+          itemStyle: {
+            ...source.itemStyle,
+            color: itemColor,
+          },
+          areaStyle: {
+            ...source.areaStyle,
+            color: itemColor,
+          },
+        }
+      })
+    : series.data
 
   return {
     ...series,
+    data: styledData,
     symbol: config.lineSymbol,
     symbolSize: config.lineSymbolSize,
     lineStyle: {
@@ -988,7 +1379,11 @@ function styleRadarSeries(
   }
 }
 
-function legendLayout(config: ResolvedChartStyle) {
+function legendLayout(
+  config: ResolvedChartStyle,
+  presentationLine = false,
+  hasTitle = false,
+) {
   const common = {
     type: 'scroll',
     itemWidth: config.legendItemSize,
@@ -997,7 +1392,13 @@ function legendLayout(config: ResolvedChartStyle) {
   }
 
   if (config.legendPosition === 'top') {
-    return { ...common, top: 18, left: 'center', orient: 'horizontal' }
+    return {
+      ...common,
+      top: presentationLine && hasTitle ? 48 : 18,
+      left: 'center',
+      right: presentationLine ? 0 : undefined,
+      orient: 'horizontal',
+    }
   }
   if (config.legendPosition === 'bottom') {
     return { ...common, bottom: 18, left: 'center', orient: 'horizontal' }
@@ -1008,9 +1409,27 @@ function legendLayout(config: ResolvedChartStyle) {
   return { ...common, right: 18, top: 'middle', orient: 'vertical' }
 }
 
-function gridLayout(config: ResolvedChartStyle) {
+function gridLayout(
+  config: ResolvedChartStyle,
+  presentationLine = false,
+  hasTitle = false,
+) {
   const padding = config.chartPadding
   const reserved = 66
+
+  if (presentationLine) {
+    return {
+      left: padding,
+      right: padding,
+      top:
+        padding +
+        (hasTitle ? 48 : 0) +
+        (config.showLegend ? 44 : 8),
+      bottom: padding,
+      outerBoundsMode: 'same',
+      outerBoundsContain: 'axisLabel',
+    }
+  }
 
   return {
     left:
@@ -1034,6 +1453,94 @@ function gridLayout(config: ResolvedChartStyle) {
   }
 }
 
+function barDatumNumber(item: unknown): number | null {
+  const rawValue =
+    item !== null && typeof item === 'object' && !Array.isArray(item)
+      ? (item as { value?: unknown }).value
+      : item
+  let candidate: unknown = rawValue
+  if (Array.isArray(rawValue)) {
+    candidate = null
+    for (let index = rawValue.length - 1; index >= 0; index -= 1) {
+      if (typeof rawValue[index] === 'number') {
+        candidate = rawValue[index]
+        break
+      }
+    }
+  }
+
+  return typeof candidate === 'number' && Number.isFinite(candidate)
+    ? candidate
+    : null
+}
+
+function orderBarCategories(
+  option: EChartsOption,
+  order: BarOrder,
+): EChartsOption {
+  if (order === 'value') return option
+
+  const xAxes = asArray(option.xAxis)
+  const categoryAxisIndex = xAxes.findIndex(
+    (axis) => axis?.type === 'category' || Array.isArray(axis?.data),
+  )
+  const categories = xAxes[categoryAxisIndex]?.data
+  const series = asArray(option.series)
+  const barSeries = series.filter(
+    (item) => item?.type === 'bar' && Array.isArray(item.data),
+  )
+
+  if (
+    categoryAxisIndex < 0 ||
+    !Array.isArray(categories) ||
+    categories.length < 2 ||
+    barSeries.length === 0
+  ) {
+    return option
+  }
+
+  const ranked = categories.map((_, index) => {
+    const values = barSeries
+      .map((item) => barDatumNumber(item.data[index]))
+      .filter((value): value is number => value !== null)
+
+    return {
+      index,
+      hasValue: values.length > 0,
+      value: values.reduce((sum, value) => sum + value, 0),
+    }
+  })
+
+  ranked.sort((a, b) => {
+    if (a.hasValue !== b.hasValue) return a.hasValue ? -1 : 1
+    const difference = order === 'normal'
+      ? a.value - b.value
+      : b.value - a.value
+    return difference || a.index - b.index
+  })
+
+  const indices = ranked.map((item) => item.index)
+  const orderedAxes = xAxes.map((axis, index) =>
+    index === categoryAxisIndex
+      ? { ...axis, data: indices.map((itemIndex) => categories[itemIndex]) }
+      : axis,
+  )
+  const orderedSeries = series.map((item) =>
+    Array.isArray(item?.data) && item.data.length === categories.length
+      ? {
+          ...item,
+          data: indices.map((itemIndex) => item.data[itemIndex]),
+        }
+      : item,
+  )
+
+  return {
+    ...option,
+    xAxis: restoreShape(option.xAxis, orderedAxes),
+    series: restoreShape(option.series, orderedSeries),
+  }
+}
+
 export function applyChartStyle(
   option: EChartsOption,
   overrides: ChartStyleConfig = {},
@@ -1046,7 +1553,13 @@ export function applyChartStyle(
       overrides.paletteOpacities ?? DEFAULT_CHART_STYLE.paletteOpacities,
   }
 
+  option = orderBarCategories(option, config.barOrder)
+
   const seriesSource = asArray(option.series)
+  const stackedBarBounds =
+    config.barArrangement === 'stacked'
+      ? getStackedBarBounds(seriesSource)
+      : null
   const hasBarSeries = seriesSource.some((series) => series.type === 'bar')
   const horizontal =
     hasBarSeries &&
@@ -1060,15 +1573,41 @@ export function applyChartStyle(
     styleAxis(axis, config, 'y'),
   )
 
-  const series = seriesSource.map((item, index) => {
-    if (item.type === 'bar') return styleBarSeries(item, index, config)
-    if (item.type === 'line') return styleLineSeries(item, index, config)
-    if (item.type === 'pie') return stylePieSeries(item, index, config)
-    if (item.type === 'scatter') {
-      return styleScatterSeries(item, index, config)
+  const series: EChartsOption[] = []
+  seriesSource.forEach((item, index) => {
+    if (item.type === 'bar') {
+      series.push(
+        styleBarSeries(
+          item,
+          index,
+          seriesSource.length,
+          stackedBarBounds,
+          config,
+        ),
+      )
+      return
     }
-    if (item.type === 'radar') return styleRadarSeries(item, index, config)
-    return { ...item }
+    if (item.type === 'line') {
+      series.push(styleLineSeries(item, index, seriesSource.length, config))
+      return
+    }
+    if (item.type === 'pie') {
+      const styledPie = stylePieSeries(item, index, config)
+      series.push(styledPie)
+      if (config.presentationMode && config.showPiePercentages) {
+        series.push(piePercentageSeries(styledPie, config))
+      }
+      return
+    }
+    if (item.type === 'scatter') {
+      series.push(styleScatterSeries(item, index, seriesSource.length, config))
+      return
+    }
+    if (item.type === 'radar') {
+      series.push(styleRadarSeries(item, index, config))
+      return
+    }
+    series.push({ ...item })
   })
 
   const hasCartesianAxes =
@@ -1076,6 +1615,10 @@ export function applyChartStyle(
   const palette =
     config.palette.length > 0 ? config.palette : DEFAULT_PALETTE
   const titleSource = asArray(option.title)
+  const hasTitle = config.showTitle && titleSource.length > 0
+  const presentationLine =
+    config.presentationMode &&
+    seriesSource.some((item) => item.type === 'line')
   const titles = titleSource.map((title) => ({
     ...title,
     show: config.showTitle,
@@ -1087,8 +1630,9 @@ export function applyChartStyle(
       fontWeight: config.fontWeight,
     },
   }))
-  const chartGrid = gridLayout(config)
+  const chartGrid = gridLayout(config, presentationLine, hasTitle)
   if (
+    !presentationLine &&
     config.showTitle &&
     titleSource.length > 0 &&
     typeof chartGrid.top === 'number'
@@ -1109,8 +1653,11 @@ export function applyChartStyle(
       fontWeight: config.fontWeight,
     },
     title: restoreShape(option.title, titles),
-    animationDuration: config.animationDuration,
-    animationDurationUpdate: config.animationUpdateDuration,
+    ...(config.presentationMode ? { animation: false } : {}),
+    animationDuration: config.presentationMode ? 0 : config.animationDuration,
+    animationDurationUpdate: config.presentationMode
+      ? 0
+      : config.animationUpdateDuration,
     animationEasing: config.animationEasing,
     animationEasingUpdate: config.animationEasing,
     grid: hasCartesianAxes
@@ -1122,7 +1669,7 @@ export function applyChartStyle(
     legend: option.legend
       ? {
           ...option.legend,
-          ...legendLayout(config),
+          ...legendLayout(config, presentationLine, hasTitle),
           icon: option.legend.icon ?? 'circle',
           textStyle: {
             ...option.legend?.textStyle,
@@ -1136,12 +1683,15 @@ export function applyChartStyle(
             color: config.mutedTextColor,
           },
           show: config.showLegend,
+          selectedMode: config.presentationMode
+            ? false
+            : option.legend.selectedMode,
         }
       : option.legend,
     tooltip: option.tooltip
       ? {
           ...option.tooltip,
-          show: config.showTooltip,
+          show: config.presentationMode ? false : config.showTooltip,
           backgroundColor: hexToRgba(config.tooltipBackgroundColor, 96),
           borderColor: config.tooltipBorderColor,
           borderWidth: 1,

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
+import { LabelLayout } from 'echarts/features'
 import {
   BarChart,
   LineChart,
@@ -16,10 +17,19 @@ import {
   TooltipComponent,
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import ChartDataEditor from './components/ChartDataEditor.vue'
 import HexColorInput from './components/HexColorInput.vue'
 import NewDesignPanel from './components/NewDesignPanel.vue'
 import NewUiAppShell from './components/NewUiAppShell.vue'
-import { applyChartStyle } from './chartStyle'
+import {
+  applyChartStyle,
+  getMinimumPieThicknessPercent,
+  getPieInnerRadius,
+  getPieThicknessPercent,
+  MAX_LINE_WIDTH_PX,
+  MAX_PIE_RING_THICKNESS_PERCENT,
+  MIN_LINE_WIDTH_PX,
+} from './chartStyle'
 import type {
   AnimationEasing,
   BarArrangement,
@@ -28,6 +38,7 @@ import type {
   EmphasisFocus,
   LabelAlignment,
   LegendPosition,
+  LineShape,
   LineStep,
   LineStyleType,
   PieLabelPosition,
@@ -58,6 +69,7 @@ use([
   LegendComponent,
   TitleComponent,
   TooltipComponent,
+  LabelLayout,
 ])
 
 type Renderer = 'canvas' | 'svg'
@@ -83,6 +95,7 @@ type StyleSettings = ResolvedChartStyle
 const initialCategories = ['Апрель', 'Май', 'Июнь', 'Июль', 'Август']
 const initialSeries = [
   { id: 1, name: 'Средняя температура', values: [12, 19, 22, 24, 22] },
+  { id: 2, name: 'Серия 2', values: [16, 14, 18, 20, 17] },
 ]
 
 const chartTypes: Array<{ value: ChartType; label: string }> = [
@@ -129,8 +142,7 @@ const isNewUi = computed(() => uiDesignMode.value === 'new')
 const chartTitle = ref('Средняя температура')
 const selectedBackgroundId = ref('white')
 const customBackground = ref('#b42318')
-const selectedPieSeriesId = ref(1)
-const nextSeriesId = ref(2)
+const nextSeriesId = ref(3)
 const copied = ref(false)
 const isEditingCss = ref(false)
 const cssCode = ref('')
@@ -282,14 +294,51 @@ function markPaletteCustom() {
   selectedPaletteId.value = 'custom'
 }
 
+function hexChannels(color: string): [number, number, number] | null {
+  const match = color.trim().match(/^#([\da-f]{6})$/i)
+  if (!match?.[1]) return null
+  return [
+    Number.parseInt(match[1].slice(0, 2), 16),
+    Number.parseInt(match[1].slice(2, 4), 16),
+    Number.parseInt(match[1].slice(4, 6), 16),
+  ]
+}
+
+function nextDistinctPaletteColor(colors: string[]) {
+  const existing = colors
+    .map(hexChannels)
+    .filter((color): color is [number, number, number] => color !== null)
+  const candidates = Array.from({ length: 72 }, (_, index) =>
+    hslToHex(
+      index * 137.508,
+      index % 3 === 0 ? 82 : 70,
+      index % 2 === 0 ? 52 : 64,
+    ),
+  )
+
+  if (existing.length === 0) return candidates[0]!
+
+  return candidates.reduce(
+    (best, candidate) => {
+      const channels = hexChannels(candidate)!
+      const distance = Math.min(
+        ...existing.map(([red, green, blue]) =>
+          (channels[0] - red) ** 2 +
+          (channels[1] - green) ** 2 +
+          (channels[2] - blue) ** 2,
+        ),
+      )
+      return distance > best.distance ? { color: candidate, distance } : best
+    },
+    { color: candidates[0]!, distance: -1 },
+  ).color
+}
+
 function addPaletteColor() {
-  if (styleSettings.value.palette.length >= 12) return
-  const lastColor =
-    styleSettings.value.palette.at(-1) ??
-    PALETTE_PRESETS[0].colors[0]
+  const newColor = nextDistinctPaletteColor(styleSettings.value.palette)
   styleSettings.value = {
     ...styleSettings.value,
-    palette: [...styleSettings.value.palette, lastColor],
+    palette: [...styleSettings.value.palette, newColor],
     paletteOpacities: [...styleSettings.value.paletteOpacities, 100],
   }
   selectedPaletteId.value = 'custom'
@@ -374,6 +423,7 @@ function formatCss(settings: StyleSettings) {
   --chart-category-label-color: ${settings.categoryLabelColor};
   --chart-value-axis-label-color: ${settings.valueAxisLabelColor};
   --chart-pie-label-color: ${settings.pieLabelColor};
+  --chart-pie-label-size: ${settings.pieLabelSize}px;
   --chart-x-axis-label-rotate: ${settings.xAxisLabelRotate}deg;
   --chart-y-axis-label-rotate: ${settings.yAxisLabelRotate}deg;
   --chart-x-axis-label-margin: ${settings.xAxisLabelMargin}px;
@@ -417,20 +467,25 @@ function formatCss(settings: StyleSettings) {
   --chart-bar-background-color: ${settings.barBackgroundColor};
 
   /* Линии */
+  --chart-line-show: ${Number(settings.showLines)};
+  --chart-line-shape: ${settings.lineShape};
   --chart-line-width: ${settings.lineWidth}px;
   --chart-line-opacity: ${settings.lineOpacity}%;
   --chart-line-type: ${settings.lineType};
   --chart-smooth-lines: ${Number(settings.smoothLines)};
   --chart-show-line-symbols: ${Number(settings.showLineSymbols)};
+  --chart-line-show-points: ${Number(settings.showLineSymbols)};
   --chart-line-symbol-size: ${settings.lineSymbolSize}px;
   --chart-line-symbol: ${settings.lineSymbol};
-  --chart-connect-nulls: ${Number(settings.connectNulls)};
   --chart-line-step: ${settings.lineStep};
   --chart-area-opacity: ${settings.areaOpacity}%;
+  --chart-line-show-area: ${Number(settings.showLineArea)};
   --chart-line-stacked: ${Number(settings.lineStacked)};
   --chart-show-end-label: ${Number(settings.showEndLabel)};
 
   /* Круговые */
+  --chart-pie-show-names: ${Number(settings.showPieLabels)};
+  --chart-pie-show-percentages: ${Number(settings.showPiePercentages)};
   --chart-pie-inner-radius: ${settings.pieInnerRadius}%;
   --chart-pie-outer-radius: ${settings.pieOuterRadius}%;
   --chart-pie-gap: ${settings.piePadAngle}deg;
@@ -576,6 +631,7 @@ function applyCssCode(value: string) {
     ['x-axis-label-size', 'xAxisLabelSize', 8, 40],
     ['y-axis-label-size', 'yAxisLabelSize', 8, 40],
     ['value-label-size', 'valueLabelSize', 10, 48],
+    ['pie-label-size', 'pieLabelSize', 10, 48],
     ['axis-label-weight', 'axisLabelWeight', 400, 900],
     ['value-label-weight', 'valueLabelWeight', 400, 900],
     ['x-axis-label-rotate', 'xAxisLabelRotate', -90, 90],
@@ -592,7 +648,7 @@ function applyCssCode(value: string) {
     ['bar-min-height', 'barMinHeight', 0, 80],
     ['bar-opacity', 'barOpacity', 0, 100],
     ['bar-border-width', 'barBorderWidth', 0, 20],
-    ['line-width', 'lineWidth', 1, 40],
+    ['line-width', 'lineWidth', MIN_LINE_WIDTH_PX, MAX_LINE_WIDTH_PX],
     ['line-opacity', 'lineOpacity', 0, 100],
     ['line-symbol-size', 'lineSymbolSize', 2, 40],
     ['area-opacity', 'areaOpacity', 0, 100],
@@ -664,13 +720,17 @@ function applyCssCode(value: string) {
     ['gradient-bars', 'gradientBars'],
     ['color-bars-by-data', 'colorBarsByData'],
     ['show-bar-background', 'showBarBackground'],
+    ['line-show', 'showLines'],
     ['smooth-lines', 'smoothLines'],
     ['show-line-symbols', 'showLineSymbols'],
-    ['connect-nulls', 'connectNulls'],
+    ['line-show-points', 'showLineSymbols'],
+    ['line-show-area', 'showLineArea'],
     ['line-stacked', 'lineStacked'],
     ['show-end-label', 'showEndLabel'],
     ['pie-clockwise', 'pieClockwise'],
+    ['pie-show-percentages', 'showPiePercentages'],
     ['show-pie-labels', 'showPieLabels'],
+    ['pie-show-names', 'showPieLabels'],
     ['show-pie-label-lines', 'showPieLabelLines'],
     ['pie-selected-mode', 'pieSelectedMode'],
     ['show-scatter-labels', 'showScatterLabels'],
@@ -705,7 +765,13 @@ function applyCssCode(value: string) {
     ['bar-order', 'barOrder', ['normal', 'reverse', 'value']],
     ['bar-value-position', 'barValuePosition', ['inside', 'top']],
     ['bar-category-position', 'barCategoryPosition', ['axis', 'inside']],
-    ['line-type', 'lineType', ['solid', 'dashed', 'dotted']],
+    ['line-shape', 'lineShape', ['straight', 'smooth', 'step']],
+    ['line-type', 'lineType', [
+      'solid',
+      'dashed',
+      'dotted',
+      'dashDotted',
+    ]],
     ['line-symbol', 'lineSymbol', [
       'circle',
       'rect',
@@ -753,6 +819,20 @@ function applyCssCode(value: string) {
       if (opacity !== null) next.paletteOpacities[index] = opacity
     }
   })
+
+  if (next.presentationMode) {
+    if (chartType.value === 'pie') {
+      next.pieInnerRadius = 0
+    } else if (chartType.value === 'doughnut') {
+      next.pieInnerRadius = Math.min(
+        Math.max(1, next.pieInnerRadius),
+        Math.max(1, next.pieOuterRadius - 1),
+      )
+    }
+
+    next.smoothLines = next.lineShape === 'smooth'
+    next.lineStep = next.lineShape === 'step' ? 'middle' : 'none'
+  }
 
   styleSettings.value = next
   selectedPaletteId.value = 'custom'
@@ -814,10 +894,6 @@ function hslToHex(hue: number, saturation: number, lightness: number) {
 }
 
 function randomizeChartStyle() {
-  const availableTypes = chartTypes
-    .map((item) => item.value)
-    .filter((type) => type !== chartType.value)
-  const nextType = randomChoice(availableTypes)
   const baseHue = randomInteger(0, 359)
   const harmony = [0, 28, 58, 142, 178, 214, 264, 310, 336]
   const palette = harmony.map((offset, index) =>
@@ -827,46 +903,68 @@ function randomizeChartStyle() {
       index < 3 ? randomInteger(48, 62) : randomInteger(52, 68),
     ),
   )
+  const presentation = styleSettings.value.presentationMode
+  const currentType = chartType.value
+  const pieOuterRadius = randomInteger(64, 92)
   const pieInnerRadius =
-    nextType === 'doughnut' ? randomInteger(28, 58) : randomInteger(0, 22)
+    currentType === 'doughnut'
+      ? randomInteger(24, Math.max(25, pieOuterRadius - 16))
+      : 0
+  const lineShape = randomChoice<LineShape>([
+    'straight',
+    'smooth',
+    'step',
+  ])
+  const showLines = randomBoolean(0.82)
+  const showLineSymbols = randomBoolean(0.5)
 
-  selectChartType(nextType)
   styleSettings.value = {
     ...styleSettings.value,
-    backgroundColor: hslToHex(
-      baseHue + randomInteger(-20, 20),
-      randomInteger(18, 42),
-      randomInteger(4, 14),
-    ),
-    textColor: '#ffffff',
-    mutedTextColor: hslToHex(baseHue, 18, randomInteger(68, 82)),
+    backgroundColor: presentation
+      ? 'transparent'
+      : hslToHex(
+          baseHue + randomInteger(-20, 20),
+          randomInteger(18, 42),
+          randomInteger(4, 14),
+        ),
+    textColor: presentation ? '#000000' : '#ffffff',
+    mutedTextColor: presentation
+      ? '#000000'
+      : hslToHex(baseHue, 18, randomInteger(68, 82)),
     palette,
     paletteOpacities: palette.map(() => randomInteger(78, 100)),
     fontWeight: randomChoice([500, 600, 700, 800, 900]),
     xAxisLabelSize: randomInteger(11, 18),
     yAxisLabelSize: randomInteger(10, 16),
     valueLabelSize: randomInteger(14, 32),
-    showXAxisLabels: randomBoolean(0.86),
-    showYAxisLabels: randomBoolean(0.72),
-    showValueLabels: randomBoolean(0.48),
+    pieLabelSize: randomInteger(12, 24),
+    showXAxisLabels: presentation && currentType === 'line'
+      ? true
+      : randomBoolean(0.86),
+    showYAxisLabels: presentation && currentType === 'line'
+      ? true
+      : randomBoolean(0.72),
+    showValueLabels: presentation && currentType === 'line'
+      ? false
+      : randomBoolean(0.48),
     labelAlignment: randomChoice<LabelAlignment>([
       'left',
       'center',
       'right',
     ]),
     showTitle: randomBoolean(0.88),
-    showLegend: randomBoolean(0.72),
-    legendPosition: randomChoice<LegendPosition>([
-      'top',
-      'bottom',
-      'left',
-      'right',
-    ]),
-    showTooltip: true,
+    showLegend: presentation && currentType === 'line'
+      ? true
+      : randomBoolean(0.72),
+    legendPosition: presentation && currentType === 'line'
+      ? 'top'
+      : randomChoice<LegendPosition>(['top', 'bottom', 'left', 'right']),
+    showTooltip: presentation ? false : true,
     showGridLines: randomBoolean(0.34),
     showAxisLines: randomBoolean(0.28),
     showAxisTicks: randomBoolean(0.22),
-    animationDuration: randomInteger(3, 14) * 100,
+    animationDuration: presentation ? 0 : randomInteger(3, 14) * 100,
+    animationUpdateDuration: presentation ? 0 : randomInteger(2, 10) * 100,
     barArrangement: randomChoice<BarArrangement>([
       'grouped',
       'stacked',
@@ -882,31 +980,34 @@ function randomizeChartStyle() {
     colorBarsByData: randomBoolean(0.76),
     commonBarColor: randomBoolean(0.18),
     gradientBars: randomBoolean(0.48),
+    showLines,
+    lineShape,
     lineWidth: randomInteger(2, 18),
     lineOpacity: randomInteger(70, 100),
-    lineType: randomChoice<LineStyleType>(['solid', 'dashed', 'dotted']),
-    smoothLines: randomBoolean(0.72),
-    showLineSymbols: randomBoolean(0.48),
-    lineSymbolSize: randomInteger(5, 22),
-    connectNulls: randomBoolean(0.5),
-    lineStep: randomChoice<LineStep>([
-      'none',
-      'none',
-      'start',
-      'middle',
-      'end',
+    lineType: randomChoice<LineStyleType>([
+      'solid',
+      'dashed',
+      'dotted',
+      'dashDotted',
     ]),
+    smoothLines: lineShape === 'smooth',
+    showLineSymbols,
+    lineSymbolSize: randomInteger(5, 22),
+    lineStep: lineShape === 'step' ? 'middle' : 'none',
+    showLineArea: randomBoolean(0.5),
     areaOpacity: randomInteger(12, 54),
     pieInnerRadius,
-    pieOuterRadius: randomInteger(
-      Math.max(58, pieInnerRadius + 20),
-      92,
-    ),
+    pieOuterRadius,
     piePadAngle: randomInteger(0, 8),
     pieStartAngle: randomInteger(0, 12) * 30,
     pieClockwise: randomBoolean(),
     pieRoseType: randomChoice<PieRoseType>(['none', 'none', 'radius']),
-    showPieLabels: randomBoolean(0.78),
+    showPieLabels: presentation ? true : randomBoolean(0.78),
+    showPiePercentages: presentation ? true : randomBoolean(0.5),
+    showPieLabelLines: presentation ? true : randomBoolean(0.7),
+    emphasisFocus: presentation ? 'none' : styleSettings.value.emphasisFocus,
+    emphasisScale: presentation ? false : styleSettings.value.emphasisScale,
+    selectBorderWidth: presentation ? 0 : styleSettings.value.selectBorderWidth,
     scatterSymbolSize: randomInteger(8, 42),
     scatterOpacity: randomInteger(58, 100),
     showScatterLabels: randomBoolean(0.42),
@@ -922,21 +1023,24 @@ function cloneInitialSeries(): DataSeries[] {
   }))
 }
 
-function updateNumber(
-  event: Event,
-  seriesItem: DataSeries,
-  rowIndex: number,
-) {
-  const rawValue = (event.target as HTMLInputElement).value
-  if (rawValue === '') {
-    seriesItem.values[rowIndex] = null
-    return
-  }
+function updateCategory(rowIndex: number, value: string) {
+  categories.value[rowIndex] = value
+}
 
-  const parsedValue = Number(rawValue)
-  seriesItem.values[rowIndex] = Number.isFinite(parsedValue)
-    ? parsedValue
-    : null
+function updateSeriesName(seriesId: number, value: string) {
+  const seriesItem = dataSeries.value.find((item) => item.id === seriesId)
+  if (seriesItem) seriesItem.name = value
+}
+
+function updateNumberById(seriesId: number, rowIndex: number, rawValue: string) {
+  const seriesItem = dataSeries.value.find((item) => item.id === seriesId)
+  if (!seriesItem) return
+
+  seriesItem.values[rowIndex] = rawValue === ''
+    ? null
+    : Number.isFinite(Number(rawValue))
+      ? Number(rawValue)
+      : null
 }
 
 function addRow() {
@@ -956,9 +1060,6 @@ function addSeries() {
     name: `Серия ${dataSeries.value.length + 1}`,
     values: categories.value.map(() => null),
   })
-  if (dataSeries.value.length === 1) {
-    selectedPieSeriesId.value = id
-  }
 }
 
 function removeSeries(seriesId: number) {
@@ -968,26 +1069,41 @@ function removeSeries(seriesId: number) {
 function resetData() {
   categories.value = [...initialCategories]
   dataSeries.value = cloneInitialSeries()
-  selectedPieSeriesId.value = 1
-  nextSeriesId.value = 2
+  nextSeriesId.value = 3
 }
 
-watch(
-  dataSeries,
-  (seriesList) => {
-    if (!seriesList.some((item) => item.id === selectedPieSeriesId.value)) {
-      selectedPieSeriesId.value = seriesList[0]?.id ?? 0
-    }
-  },
-  { deep: true },
-)
+const selectedPieSeries = computed(() => dataSeries.value[0])
 
-const selectedPieSeries = computed(
-  () =>
-    dataSeries.value.find(
-      (item) => item.id === selectedPieSeriesId.value,
-    ) ?? dataSeries.value[0],
-)
+const pieWarnings = computed(() => {
+  if (chartType.value !== 'pie' && chartType.value !== 'doughnut') return []
+
+  const values = selectedPieSeries.value?.values ?? []
+  const nonEmptyValues = values.filter(
+    (value, index): value is number =>
+      value !== null && Boolean(categories.value[index]?.trim()),
+  )
+  const warnings: string[] = []
+
+  if (nonEmptyValues.length > 8) {
+    warnings.push(
+      'На круговом графике больше 8 секторов — подписи и различия между значениями могут читаться хуже',
+    )
+  }
+  if (nonEmptyValues.some((value) => value < 0)) {
+    warnings.push('Круговой график не поддерживает отрицательные значения.')
+  }
+  if (
+    nonEmptyValues.length > 0 &&
+    nonEmptyValues.reduce((sum, value) => sum + value, 0) === 0
+  ) {
+    warnings.push('Сумма значений равна нулю — сектора нельзя отобразить.')
+  }
+  if (styleSettings.value.pieInnerRadius >= styleSettings.value.pieOuterRadius) {
+    warnings.push('Толщина кольца должна оставлять внутренний радиус меньше внешнего.')
+  }
+
+  return warnings
+})
 
 const selectedBackground = computed(() => {
   if (selectedBackgroundId.value === 'custom') {
@@ -1153,8 +1269,105 @@ const newUiChartScale = computed(() => {
     chartStageSize.value.width / baseWidth,
     chartStageSize.value.height / baseHeight,
   )
-  return Math.min(1.35, Math.max(0.65, scale || 1))
+  return Math.min(1.35, Math.max(0.4, scale || 1))
 })
+
+const newUiPieTitleReserve = computed(() =>
+  styleSettings.value.showTitle && chartTitle.value.trim()
+    ? Math.round(58 * newUiChartScale.value)
+    : 0,
+)
+
+const newUiPieAvailableHeight = computed(() =>
+  Math.max(120, chartStageSize.value.height - newUiPieTitleReserve.value),
+)
+
+const newUiPieMaximumRadius = computed(() =>
+  Math.max(
+    1,
+    Math.min(chartStageSize.value.width, newUiPieAvailableHeight.value) / 2,
+  ),
+)
+
+const newUiPieOuterRadius = computed(
+  () =>
+    newUiPieMaximumRadius.value *
+    (Math.min(100, Math.max(30, styleSettings.value.pieOuterRadius)) / 100),
+)
+
+const newUiPieMinimumThickness = computed(() =>
+  getMinimumPieThicknessPercent(newUiPieOuterRadius.value),
+)
+
+// ECharts сдвигает pie-label с position="inside" на 3 px наружу.
+const PIE_INSIDE_LABEL_RADIAL_OFFSET = 3
+
+function centerPieInsideLabel(
+  centerX: number,
+  centerY: number,
+) {
+  return ({
+    labelRect,
+  }: {
+    labelRect: { x: number; y: number; width: number; height: number }
+  }) => {
+    const labelCenterX = labelRect.x + labelRect.width / 2
+    const labelCenterY = labelRect.y + labelRect.height / 2
+    const radialX = labelCenterX - centerX
+    const radialY = labelCenterY - centerY
+    const radialLength = Math.hypot(radialX, radialY)
+
+    if (radialLength === 0) return { hideOverlap: true }
+
+    const unitX = radialX / radialLength
+    const unitY = radialY / radialLength
+    let labelRotation = Math.atan2(unitX, unitY)
+    if (labelRotation < 0) labelRotation += Math.PI * 2
+    if (unitY > 0) labelRotation += Math.PI
+    labelRotation -= Math.PI
+    labelRotation *= -1
+
+    const globalOffsetX = -unitX * PIE_INSIDE_LABEL_RADIAL_OFFSET
+    const globalOffsetY = -unitY * PIE_INSIDE_LABEL_RADIAL_OFFSET
+    const cosine = Math.cos(labelRotation)
+    const sine = Math.sin(labelRotation)
+
+    // labelLayout вращает dx/dy вместе с текстом: переводим глобальный
+    // радиальный сдвиг в локальные оси тангенциальной подписи.
+    return {
+      dx: cosine * globalOffsetX + sine * globalOffsetY,
+      dy: -sine * globalOffsetX + cosine * globalOffsetY,
+      hideOverlap: true,
+    }
+  }
+}
+
+watch(
+  [
+    isNewUi,
+    chartType,
+    newUiPieMinimumThickness,
+    () => styleSettings.value.pieInnerRadius,
+    () => styleSettings.value.pieOuterRadius,
+  ],
+  () => {
+    if (!isNewUi.value || chartType.value !== 'doughnut') return
+    const thickness = getPieThicknessPercent(
+      styleSettings.value.pieInnerRadius,
+      styleSettings.value.pieOuterRadius,
+    )
+    const safeThickness = Math.min(
+      MAX_PIE_RING_THICKNESS_PERCENT,
+      Math.max(newUiPieMinimumThickness.value, thickness),
+    )
+    if (Math.abs(safeThickness - thickness) < 0.001) return
+    styleSettings.value.pieInnerRadius = getPieInnerRadius(
+      styleSettings.value.pieOuterRadius,
+      safeThickness,
+    )
+  },
+  { flush: 'sync' },
+)
 
 const newUiOption = computed<ChartOption>(() => {
   const settingsSnapshot = JSON.parse(styleRevision.value) as StyleSettings
@@ -1168,6 +1381,7 @@ const newUiOption = computed<ChartOption>(() => {
     xAxisLabelSize: Math.round(settingsSnapshot.xAxisLabelSize * scale),
     yAxisLabelSize: Math.round(settingsSnapshot.yAxisLabelSize * scale),
     valueLabelSize: Math.round(settingsSnapshot.valueLabelSize * scale),
+    pieLabelSize: Math.round(settingsSnapshot.pieLabelSize * scale),
     xAxisLabelMargin: Math.round(settingsSnapshot.xAxisLabelMargin * scale),
     yAxisLabelMargin: Math.round(settingsSnapshot.yAxisLabelMargin * scale),
     barMaxWidth: Math.round(settingsSnapshot.barMaxWidth * scale),
@@ -1182,40 +1396,99 @@ const newUiOption = computed<ChartOption>(() => {
       max: ({ max }: { max: number }) =>
         Math.max(10, Math.ceil(max / 10) * 10),
       splitNumber: 3,
+      ...(kind === 'rows'
+        ? {
+            axisLabel: {
+              ...(axis?.axisLabel ?? {}),
+              showMinLabel: true,
+              showMaxLabel: true,
+              alignMinLabel: 'left',
+              alignMaxLabel: 'right',
+            },
+          }
+        : {}),
     }))
     styled[valueAxisKey] = Array.isArray(source) ? axes : axes[0]
-    styled.grid = {
-      ...(styled.grid ?? {}),
-      right: kind === 'rows' ? Math.round(54 * scale) : 0,
+
+    if (kind === 'rows') {
+      const titleReserve =
+        settingsSnapshot.showTitle && chartTitle.value.trim()
+          ? Math.round(52 * scale)
+          : 0
+      const availableHeight = Math.max(
+        180,
+        chartStageSize.value.height - titleReserve,
+      )
+      const figmaAspectRatio = 366 / 444
+      const plotWidth = Math.min(
+        chartStageSize.value.width,
+        availableHeight * figmaAspectRatio,
+      )
+
+      styled.grid = {
+        ...(styled.grid ?? {}),
+        left: 0,
+        right: 'auto',
+        top: titleReserve,
+        bottom: 0,
+        width: Math.round(plotWidth),
+      }
+    } else {
+      styled.grid = {
+        ...(styled.grid ?? {}),
+        right: 0,
+      }
     }
   }
 
   if (kind === 'pie' || kind === 'doughnut') {
-    const titleReserve =
-      settingsSnapshot.showTitle && chartTitle.value.trim()
-        ? Math.round(58 * scale)
-        : 0
-    const availableHeight = Math.max(
-      120,
-      chartStageSize.value.height - titleReserve,
+    const titleReserve = newUiPieTitleReserve.value
+    const availableHeight = newUiPieAvailableHeight.value
+    const outerRadius =
+      newUiPieMaximumRadius.value *
+      (Math.min(100, Math.max(30, settingsSnapshot.pieOuterRadius)) / 100)
+    const requestedThickness = getPieThicknessPercent(
+      settingsSnapshot.pieInnerRadius,
+      settingsSnapshot.pieOuterRadius,
     )
-    const outerRadius = Math.max(
-      48,
-      Math.min(chartStageSize.value.width, availableHeight) * 0.4,
+    const thickness =
+      kind === 'doughnut'
+        ? Math.min(
+            MAX_PIE_RING_THICKNESS_PERCENT,
+            Math.max(
+              getMinimumPieThicknessPercent(outerRadius),
+              requestedThickness,
+            ),
+          )
+        : 100
+    const innerRatio = 1 - thickness / 100
+    const roundingRatio = Math.min(
+      1,
+      Math.max(0, settingsSnapshot.pieBorderRadius / 80),
     )
-    const innerRatio =
-      settingsSnapshot.pieOuterRadius > 0
-        ? settingsSnapshot.pieInnerRadius / settingsSnapshot.pieOuterRadius
-        : 0
+    const radialThickness = outerRadius * (1 - innerRatio)
+    const relativeBorderRadius = radialThickness * 0.5 * roundingRatio
+    const centerX = chartStageSize.value.width / 2
     const centerY = titleReserve + availableHeight / 2
     const sourceSeries = Array.isArray(styled.series)
       ? styled.series
       : [styled.series]
-    const circularSeries = sourceSeries.map((series) => ({
-      ...(series ?? {}),
-      center: ['50%', centerY],
-      radius: [outerRadius * innerRatio, outerRadius],
-    }))
+    const circularSeries = sourceSeries.map((series) => {
+      const percentageLayer = String(series?.id ?? '').endsWith('-percentages')
+
+      return {
+        ...(series ?? {}),
+        center: ['50%', centerY],
+        radius: [outerRadius * innerRatio, outerRadius],
+        ...(percentageLayer
+          ? { labelLayout: centerPieInsideLabel(centerX, centerY) }
+          : {}),
+        itemStyle: {
+          ...(series?.itemStyle ?? {}),
+          borderRadius: relativeBorderRadius,
+        },
+      }
+    })
     styled.series = Array.isArray(styled.series)
       ? circularSeries
       : circularSeries[0]
@@ -1224,10 +1497,12 @@ const newUiOption = computed<ChartOption>(() => {
   if (styled.title && !Array.isArray(styled.title)) {
     styled.title = {
       ...styled.title,
+      top: 0,
       textStyle: {
         ...(styled.title.textStyle ?? {}),
         fontSize: Math.round(24 * scale),
         fontWeight: 900,
+        lineHeight: Math.round(29 * scale),
       },
     }
   }
@@ -1286,12 +1561,17 @@ async function copyOption() {
         :chart-type="chartType"
         :chart-title="chartTitle"
         :selected-palette-id="selectedPaletteId"
+        :series="dataSeries"
+        :data-row-count="categories.length"
+        :pie-warnings="pieWarnings"
+        :pie-maximum-radius-px="newUiPieMaximumRadius"
         @update:chart-title="chartTitle = $event"
         @select-chart-type="selectNewUiChartType"
         @select-columns-bar="selectColumnBar"
         @select-horizontal-bar="selectHorizontalBar"
         @apply-palette="applyNewPalette"
         @mark-palette-custom="markPaletteCustom"
+        @add-palette-color="addPaletteColor"
         @randomize="randomizeChartStyle"
         @clear="resetNewDesign"
         @close="uiDesignMode = 'classic'"
@@ -1314,6 +1594,21 @@ async function copyOption() {
           :autoresize="{ throttle: 100 }"
         />
       </div>
+    </template>
+
+    <template #data-editor>
+      <ChartDataEditor
+        :categories="categories"
+        :series="dataSeries"
+        heading-id="new-ui-data-editor-title"
+        @update-category="updateCategory"
+        @update-series-name="updateSeriesName"
+        @update-number="updateNumberById"
+        @remove-series="removeSeries"
+        @remove-row="removeRow"
+        @add-row="addRow"
+        @add-series="addSeries"
+      />
     </template>
   </NewUiAppShell>
 
@@ -1349,89 +1644,18 @@ async function copyOption() {
 
     <div class="workspace">
       <div class="editor-column">
-        <section class="panel editor-panel" aria-labelledby="editor-title">
-          <div class="panel-heading">
-            <div>
-              <h2 id="editor-title">Редактор данных</h2>
-              <p>{{ categories.length }} строк · {{ dataSeries.length }} серий</p>
-            </div>
-          </div>
-
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Категория</th>
-                  <th
-                    v-for="seriesItem in dataSeries"
-                    :key="seriesItem.id"
-                    scope="col"
-                  >
-                    <div class="series-heading">
-                      <input
-                        v-model="seriesItem.name"
-                        class="series-name"
-                        type="text"
-                        :aria-label="`Название серии ${seriesItem.id}`"
-                      />
-                      <button
-                        class="icon-button"
-                        type="button"
-                        :aria-label="`Удалить ${seriesItem.name}`"
-                        title="Удалить серию"
-                        @click="removeSeries(seriesItem.id)"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </th>
-                  <th class="delete-column" scope="col">
-                    <span class="visually-hidden">Удаление</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(_, rowIndex) in categories" :key="rowIndex">
-                  <td>
-                    <input
-                      v-model="categories[rowIndex]"
-                      type="text"
-                      :aria-label="`Категория, строка ${rowIndex + 1}`"
-                    />
-                  </td>
-                  <td
-                    v-for="seriesItem in dataSeries"
-                    :key="seriesItem.id"
-                  >
-                    <input
-                      :value="seriesItem.values[rowIndex] ?? ''"
-                      type="number"
-                      step="any"
-                      :aria-label="`${seriesItem.name}, ${categories[rowIndex]}`"
-                      @input="updateNumber($event, seriesItem, rowIndex)"
-                    />
-                  </td>
-                  <td class="delete-column">
-                    <button
-                      class="icon-button"
-                      type="button"
-                      :aria-label="`Удалить строку ${rowIndex + 1}`"
-                      title="Удалить строку"
-                      @click="removeRow(rowIndex)"
-                    >
-                      ×
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="editor-actions">
-            <button type="button" @click="addRow">+ Добавить строку</button>
-            <button type="button" @click="addSeries">+ Добавить серию</button>
-          </div>
-        </section>
+        <ChartDataEditor
+          :categories="categories"
+          :series="dataSeries"
+          heading-id="editor-title"
+          @update-category="updateCategory"
+          @update-series-name="updateSeriesName"
+          @update-number="updateNumberById"
+          @remove-series="removeSeries"
+          @remove-row="removeRow"
+          @add-row="addRow"
+          @add-series="addSeries"
+        />
 
         <section
           v-if="uiDesignMode === 'classic'"
@@ -1694,8 +1918,8 @@ async function copyOption() {
                 <input
                   v-model.number="styleSettings.lineWidth"
                   type="range"
-                  min="1"
-                  max="40"
+                  :min="MIN_LINE_WIDTH_PX"
+                  :max="MAX_LINE_WIDTH_PX"
                 />
                 <output>{{ styleSettings.lineWidth }} px</output>
               </label>
@@ -1753,11 +1977,6 @@ async function copyOption() {
                   />
                   <span aria-hidden="true" />
                   Показывать точки
-                </label>
-                <label class="switch-control">
-                  <input v-model="styleSettings.connectNulls" type="checkbox" />
-                  <span aria-hidden="true" />
-                  Соединять пропуски
                 </label>
                 <label class="switch-control">
                   <input v-model="styleSettings.lineStacked" type="checkbox" />
@@ -2784,12 +3003,17 @@ async function copyOption() {
           :chart-type="chartType"
           :chart-title="chartTitle"
           :selected-palette-id="selectedPaletteId"
+          :series="dataSeries"
+          :data-row-count="categories.length"
+          :pie-warnings="pieWarnings"
+          :pie-maximum-radius-px="newUiPieMaximumRadius"
           @update:chart-title="chartTitle = $event"
           @select-chart-type="selectNewUiChartType"
           @select-columns-bar="selectColumnBar"
           @select-horizontal-bar="selectHorizontalBar"
           @apply-palette="applyNewPalette"
           @mark-palette-custom="markPaletteCustom"
+          @add-palette-color="addPaletteColor"
           @randomize="randomizeChartStyle"
           @clear="resetNewDesign"
           @close="uiDesignMode = 'classic'"
@@ -2831,22 +3055,6 @@ async function copyOption() {
               </label>
             </div>
           </div>
-
-          <label
-            v-if="chartType === 'pie' || chartType === 'doughnut'"
-            class="pie-series-control"
-          >
-            Данные для круговой диаграммы
-            <select v-model.number="selectedPieSeriesId">
-              <option
-                v-for="seriesItem in dataSeries"
-                :key="seriesItem.id"
-                :value="seriesItem.id"
-              >
-                {{ seriesItem.name }}
-              </option>
-            </select>
-          </label>
 
           <fieldset v-if="styleMode === 'default'" class="background-picker">
             <legend>Фон под графиком</legend>

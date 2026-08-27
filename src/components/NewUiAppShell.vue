@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import fokusLogo from '../assets/new-ui/app-shell/fokus-logo.svg'
 import leadsIcon from '../assets/new-ui/app-shell/leads.svg'
 import shareIcon from '../assets/new-ui/app-shell/share.svg'
@@ -17,6 +18,7 @@ defineEmits<{
 }>()
 
 const slideDots = Array.from({ length: 10 }, (_, index) => index)
+const isDataEditorOpen = ref(false)
 </script>
 
 <template>
@@ -73,23 +75,62 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
       <div class="new-ui-chart-card">
         <slot name="chart" />
       </div>
-      <button
-        class="new-ui-random-chart-button"
-        type="button"
-        @click="$emit('randomize')"
-      >
-        <span>Случайный график</span>
-        <i class="new-ui-random-squiggle" aria-hidden="true">
-          <img :src="randomChartSquiggle" alt="" />
-        </i>
-        <i class="new-ui-random-star" aria-hidden="true">
-          <img :src="randomChartStar" alt="" />
-        </i>
-        <i class="new-ui-random-bars" aria-hidden="true">
-          <img :src="randomChartBars" alt="" />
-        </i>
-      </button>
+      <div class="new-ui-chart-actions">
+        <button
+          class="new-ui-random-chart-button"
+          type="button"
+          @click="$emit('randomize')"
+        >
+          <span>Случайный график</span>
+          <i class="new-ui-random-squiggle" aria-hidden="true">
+            <img :src="randomChartSquiggle" alt="" />
+          </i>
+          <i class="new-ui-random-star" aria-hidden="true">
+            <img :src="randomChartStar" alt="" />
+          </i>
+          <i class="new-ui-random-bars" aria-hidden="true">
+            <img :src="randomChartBars" alt="" />
+          </i>
+        </button>
+        <button
+          class="new-ui-edit-data-button"
+          type="button"
+          aria-controls="new-ui-data-editor"
+          :aria-expanded="isDataEditorOpen"
+          @click="isDataEditorOpen = true"
+        >
+          Редактировать данные
+        </button>
+      </div>
     </section>
+
+    <div
+      v-if="isDataEditorOpen"
+      class="new-ui-data-editor-backdrop"
+      @click.self="isDataEditorOpen = false"
+      @keydown.esc="isDataEditorOpen = false"
+    >
+      <section
+        id="new-ui-data-editor"
+        class="new-ui-data-editor-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-ui-data-dialog-title"
+      >
+        <header>
+          <h2 id="new-ui-data-dialog-title">Редактировать данные</h2>
+          <button
+            type="button"
+            aria-label="Закрыть редактор данных"
+            title="Закрыть редактор данных"
+            @click="isDataEditorOpen = false"
+          >
+            ×
+          </button>
+        </header>
+        <slot name="data-editor" />
+      </section>
+    </div>
   </main>
 </template>
 
@@ -329,6 +370,18 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
   pointer-events: auto;
 }
 
+.new-ui-chart-actions {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 24px auto 0;
+  pointer-events: auto;
+}
+
 .new-ui-random-chart-button {
   position: relative;
   display: flex;
@@ -337,7 +390,7 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
   min-height: 52px;
   align-items: center;
   justify-content: center;
-  margin: 24px auto 0;
+  margin: 0;
   padding: 5px 14px 5px 10px;
   border: 0;
   border-radius: 91.772px;
@@ -428,5 +481,141 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
   max-width: 30.784px;
   max-height: 27.365px;
   transform: rotate(21.06deg);
+}
+
+.new-ui-edit-data-button {
+  height: 52px;
+  min-height: 52px;
+  padding: 5px 24px;
+  border: 2px solid #4d0ae2;
+  border-radius: 91.772px;
+  color: #4d0ae2;
+  background: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.new-ui-edit-data-button:hover {
+  color: #fff;
+  background: #4d0ae2;
+}
+
+.new-ui-data-editor-backdrop {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  padding: 32px;
+  background: rgb(0 0 0 / 48%);
+  pointer-events: auto;
+  place-items: center;
+}
+
+.new-ui-data-editor-dialog {
+  width: min(900px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 24px;
+  background: #f6f6f6;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 25%);
+}
+
+.new-ui-data-editor-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.new-ui-data-editor-dialog > header h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.new-ui-data-editor-dialog > header button {
+  display: grid;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #000;
+  background: #fff;
+  font-size: 28px;
+  line-height: 1;
+  place-items: center;
+}
+
+.new-ui-data-editor-dialog :deep(.editor-panel) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.new-ui-data-editor-dialog :deep(.panel-heading) {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .new-ui-app-shell {
+    min-width: 0;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .new-ui-embedded-app {
+    display: none;
+  }
+
+  .new-ui-settings-drawer {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .new-ui-settings-drawer :deep(.new-design-panel) {
+    margin: 0 auto;
+  }
+
+  .new-ui-chart-preview {
+    position: relative;
+    inset: auto;
+    padding: 24px 16px 64px;
+    pointer-events: auto;
+  }
+
+  .new-ui-chart-card {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+@media (max-width: 620px) {
+  .new-ui-data-editor-backdrop {
+    padding: 12px;
+  }
+
+  .new-ui-data-editor-dialog {
+    max-height: calc(100vh - 24px);
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .new-ui-chart-actions {
+    width: 100%;
+  }
+
+  .new-ui-random-chart-button,
+  .new-ui-edit-data-button {
+    width: 100%;
+    max-width: 330px;
+  }
 }
 </style>

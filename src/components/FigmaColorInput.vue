@@ -6,7 +6,6 @@ const props = defineProps<{
   opacity: number
   label: string
   open: boolean
-  popoverOffsetY?: number
 }>()
 
 const emit = defineEmits<{
@@ -17,12 +16,17 @@ const emit = defineEmits<{
 }>()
 
 const root = ref<HTMLElement | null>(null)
+const popover = ref<HTMLElement | null>(null)
 const saturationField = ref<HTMLElement | null>(null)
 const draft = ref(props.modelValue.replace('#', '').toUpperCase())
+const opacityDraft = ref(String(Math.round(clamp(props.opacity))))
+const editingOpacity = ref(false)
 const hue = ref(196)
 const saturation = ref(50)
 const brightness = ref(88)
 const pendingInternalColor = ref<string | null>(null)
+const popoverPosition = ref({ left: -181, top: -5 })
+let positionObserver: ResizeObserver | null = null
 
 function clamp(value: number, minimum = 0, maximum = 100) {
   return Math.min(maximum, Math.max(minimum, value))
@@ -110,6 +114,27 @@ function applyDraft() {
   hexToHsv(color)
 }
 
+function updateOpacityDraft(event: Event) {
+  const input = event.target as HTMLInputElement
+  const digits = input.value.replace(/\D/g, '').slice(0, 3)
+
+  if (digits === '') {
+    opacityDraft.value = ''
+    return
+  }
+
+  const value = clamp(Number.parseInt(digits, 10))
+  opacityDraft.value = String(value)
+  emit('update:opacity', value)
+}
+
+function finishOpacityEditing() {
+  if (opacityDraft.value === '') {
+    opacityDraft.value = String(Math.round(clamp(props.opacity)))
+  }
+  editingOpacity.value = false
+}
+
 function closeOutside(event: PointerEvent) {
   const target = event.target
   if (target instanceof Element && target.closest('.figma-color-input')) return
@@ -119,6 +144,49 @@ function closeOutside(event: PointerEvent) {
 function toggleOpen() {
   if (props.open) emit('close')
   else emit('open')
+}
+
+function updatePopoverPosition() {
+  const rootElement = root.value
+  const popoverElement = popover.value
+  const paletteCard = rootElement?.closest<HTMLElement>('.new-design-palette-card')
+  if (!rootElement || !popoverElement || !paletteCard) return
+
+  const rootBounds = rootElement.getBoundingClientRect()
+  const popoverBounds = popoverElement.getBoundingClientRect()
+  const cardBounds = paletteCard.getBoundingClientRect()
+  const cardInset = 16
+  const popoverGap = 9
+  const minimumLeft = cardBounds.left + cardInset
+  const maximumLeft = Math.max(
+    minimumLeft,
+    cardBounds.right - cardInset - popoverBounds.width,
+  )
+  const preferredLeft = rootBounds.left - popoverBounds.width - popoverGap
+  const absoluteLeft = Math.min(
+    maximumLeft,
+    Math.max(minimumLeft, preferredLeft),
+  )
+  const paletteList = rootElement.closest<HTMLElement>('.new-design-palette-list')
+  const hasExtendedPalette =
+    (paletteList?.querySelectorAll('.figma-color-input').length ?? 0) > 5
+  const minimumTop = cardBounds.top + cardInset
+  const maximumTop = Math.max(
+    minimumTop,
+    cardBounds.bottom - cardInset - popoverBounds.height,
+  )
+  const preferredTop = hasExtendedPalette
+    ? rootBounds.top
+    : minimumTop
+  const absoluteTop = Math.min(
+    maximumTop,
+    Math.max(minimumTop, preferredTop),
+  )
+
+  popoverPosition.value = {
+    left: absoluteLeft - rootBounds.left,
+    top: absoluteTop - rootBounds.top,
+  }
 }
 
 const pureHue = computed(() => `hsl(${hue.value} 100% 50%)`)
@@ -160,8 +228,40 @@ watch(
   { immediate: true },
 )
 
-onMounted(() => document.addEventListener('pointerdown', closeOutside))
-onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
+watch(
+  () => props.opacity,
+  (value) => {
+    if (!editingOpacity.value) {
+      opacityDraft.value = String(Math.round(clamp(value)))
+    }
+  },
+)
+
+watch(
+  () => props.open,
+  async (open) => {
+    if (!open) return
+    await nextTick()
+    updatePopoverPosition()
+  },
+)
+
+onMounted(() => {
+  document.addEventListener('pointerdown', closeOutside)
+  window.addEventListener('resize', updatePopoverPosition)
+  positionObserver = new ResizeObserver(updatePopoverPosition)
+  if (root.value) {
+    positionObserver.observe(root.value)
+    const paletteCard = root.value.closest<HTMLElement>('.new-design-palette-card')
+    if (paletteCard) positionObserver.observe(paletteCard)
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', closeOutside)
+  window.removeEventListener('resize', updatePopoverPosition)
+  positionObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -186,21 +286,28 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
     </div>
     <div class="figma-color-opacity">
       <input
-        :value="opacity"
-        type="number"
-        min="0"
-        max="100"
-        :style="{ width: `${String(Math.round(opacity)).length}ch` }"
+        v-model="opacityDraft"
+        type="text"
+        inputmode="numeric"
+        maxlength="3"
+        autocomplete="off"
         :aria-label="`${label}: непрозрачность`"
-        @input="emit('update:opacity', clamp(Number(($event.target as HTMLInputElement).value) || 0))"
+        @focus="editingOpacity = true"
+        @input="updateOpacityDraft"
+        @blur="finishOpacityEditing"
+        @keydown.enter.prevent="finishOpacityEditing"
       />
       <span>%</span>
     </div>
 
     <div
       v-if="open"
+      ref="popover"
       class="figma-color-popover"
-      :style="{ top: `${-5 + (popoverOffsetY ?? 0)}px` }"
+      :style="{
+        left: `${popoverPosition.left}px`,
+        top: `${popoverPosition.top}px`,
+      }"
     >
       <div
         ref="saturationField"
@@ -256,9 +363,9 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
 .figma-color-input {
   position: relative;
   display: grid;
-  width: 224px;
+  width: 219px;
   height: 40px;
-  grid-template-columns: 152px 72px;
+  grid-template-columns: 152px 67px;
   border: 1px solid #ececec;
   border-radius: 10px;
   color: #000;
@@ -312,9 +419,10 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
 .figma-color-opacity {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0;
+  justify-content: flex-end;
+  gap: 0;
+  min-width: 0;
+  padding: 0 8px;
   border-left: 1px solid #ececec;
 }
 
@@ -323,8 +431,9 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
 }
 
 .figma-color-opacity input {
-  flex: 0 0 auto;
-  min-width: 1ch;
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
   padding: 0;
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -332,6 +441,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
 
 .figma-color-opacity span {
   flex: 0 0 auto;
+  padding: 0 2px;
   color: #8d8b91;
   font-size: 14px;
   font-weight: 500;
@@ -345,7 +455,6 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
 
 .figma-color-popover {
   position: absolute;
-  left: -181px;
   display: flex;
   width: 172px;
   height: 236px;
@@ -354,6 +463,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
   padding: 4px;
   border-radius: 16px;
   background: #000;
+  z-index: 6;
 }
 
 .figma-saturation-field {

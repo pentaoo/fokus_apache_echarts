@@ -1,12 +1,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import FigmaColorInput from './FigmaColorInput.vue'
+import FigmaPercentInput from './FigmaPercentInput.vue'
 import type {
   BarArrangement,
   BarOrder,
   BarValuePosition,
   LabelAlignment,
+  LineShape,
+  LineStyleType,
   ResolvedChartStyle,
+} from '../chartStyle'
+import {
+  getMinimumPieThicknessPercent,
+  getPieInnerRadius,
+  getPieThicknessPercent,
+  MAX_LINE_WIDTH_PX,
+  MAX_PIE_RING_THICKNESS_PERCENT,
+  MIN_LINE_WIDTH_PX,
+  MIN_PIE_RING_THICKNESS_PX,
 } from '../chartStyle'
 import type { ChartType, PalettePresetId } from '../stylePresets'
 import alignCenterIcon from '../assets/new-ui/align-center.svg'
@@ -28,11 +40,20 @@ interface PaletteChoice {
   colors: string[]
 }
 
+interface PanelSeries {
+  id: number
+  name: string
+}
+
 const props = defineProps<{
   settings: ResolvedChartStyle
   chartType: ChartType
   chartTitle: string
   selectedPaletteId: PalettePresetId | 'chalk'
+  series: PanelSeries[]
+  dataRowCount: number
+  pieWarnings: string[]
+  pieMaximumRadiusPx: number
 }>()
 
 const emit = defineEmits<{
@@ -42,6 +63,7 @@ const emit = defineEmits<{
   'select-horizontal-bar': []
   'apply-palette': [id: PaletteChoice['id'], colors: string[]]
   'mark-palette-custom': []
+  'add-palette-color': []
   'randomize': []
   'clear': []
   close: []
@@ -95,6 +117,44 @@ const activeType = computed(() => {
   }
   return props.chartType
 })
+
+const circular = computed(
+  () => props.chartType === 'pie' || props.chartType === 'doughnut',
+)
+
+const pieThicknessPercent = computed(() =>
+  getPieThicknessPercent(
+    props.settings.pieInnerRadius,
+    props.settings.pieOuterRadius,
+  ),
+)
+
+const pieMinimumThicknessPercent = computed(() =>
+  getMinimumPieThicknessPercent(
+    props.pieMaximumRadiusPx * (props.settings.pieOuterRadius / 100),
+  ),
+)
+
+const requiredColorCount = computed(() =>
+  props.chartType === 'line' ? props.series.length : props.dataRowCount,
+)
+
+const paletteEntries = computed(() =>
+  Array.from(
+    { length: Math.max(5, props.settings.palette.length) },
+    (_, index) => ({
+      index,
+      label:
+        props.chartType === 'line' && props.series[index]
+          ? props.series[index]!.name || `Линия ${index + 1}`
+          : `Цвет ${index + 1}`,
+    }),
+  ),
+)
+
+const canAddPaletteColor = computed(
+  () => props.settings.palette.length < requiredColorCount.value,
+)
 
 const presetScroll = ref<HTMLElement | null>(null)
 const presetDragging = ref(false)
@@ -214,13 +274,29 @@ function setPalette(choice: PaletteChoice) {
 }
 
 function updatePaletteColor(index: number, value: string) {
+  const fallback = props.settings.palette[0] ?? '#5500EB'
+  while (props.settings.palette.length <= index) {
+    props.settings.palette.push(fallback)
+  }
   props.settings.palette[index] = value
   emit('mark-palette-custom')
 }
 
 function updatePaletteOpacity(index: number, value: number) {
+  while (props.settings.paletteOpacities.length <= index) {
+    props.settings.paletteOpacities.push(100)
+  }
   props.settings.paletteOpacities[index] = value
   emit('mark-palette-custom')
+}
+
+function paletteColor(index: number) {
+  const palette = props.settings.palette
+  return palette[index] ?? palette[index % Math.max(1, palette.length)] ?? '#5500EB'
+}
+
+function paletteOpacity(index: number) {
+  return props.settings.paletteOpacities[index] ?? 100
 }
 
 function rangeStyle(value: number, minimum: number, maximum: number) {
@@ -228,36 +304,101 @@ function rangeStyle(value: number, minimum: number, maximum: number) {
     1,
     Math.max(0, (value - minimum) / (maximum - minimum)),
   )
-  const trackWidth = 176
   const thumbSize = 24
-  const fillWidth = thumbSize / 2 + (trackWidth - thumbSize) * progress
-  return { '--range-progress': `${fillWidth}px` }
+  const progressPercent = progress * 100
+  const thumbCorrection = thumbSize * progress
+  return {
+    '--range-progress': `calc(${thumbSize / 2}px + ${progressPercent}% - ${thumbCorrection}px)`,
+  }
 }
 
-function readPercent(event: Event, update: (value: number) => void) {
-  const input = event.target as HTMLInputElement
-  if (input.value === '') return
-  const value = Number(input.value)
-  if (!Number.isFinite(value)) return
-  update(Math.min(100, Math.max(0, Math.round(value))))
+function updateBarRadiusPercent(value: number) {
+  props.settings.barRadius = value * 1.2
 }
 
-function updateBarRadiusPercent(event: Event) {
-  readPercent(event, (value) => {
-    props.settings.barRadius = value * 1.2
-  })
+function updateBarWidthPercent(value: number) {
+  props.settings.barMaxWidth = 20 + value * 1.6
 }
 
-function updateBarWidthPercent(event: Event) {
-  readPercent(event, (value) => {
-    props.settings.barMaxWidth = 20 + value * 1.6
-  })
+function updateBarGapPercent(value: number) {
+  props.settings.barGapPercent = value
 }
 
-function updateBarGapPercent(event: Event) {
-  readPercent(event, (value) => {
-    props.settings.barGapPercent = value
-  })
+function updatePieOuterRadius(value: number) {
+  const nextOuterRadius = Math.min(100, Math.max(30, value))
+  if (props.chartType === 'pie') {
+    props.settings.pieOuterRadius = nextOuterRadius
+    props.settings.pieInnerRadius = 0
+  } else {
+    const minimumThickness = getMinimumPieThicknessPercent(
+      props.pieMaximumRadiusPx * (nextOuterRadius / 100),
+    )
+    const thickness = Math.min(
+      MAX_PIE_RING_THICKNESS_PERCENT,
+      Math.max(minimumThickness, pieThicknessPercent.value),
+    )
+    props.settings.pieOuterRadius = nextOuterRadius
+    props.settings.pieInnerRadius = getPieInnerRadius(
+      nextOuterRadius,
+      thickness,
+    )
+  }
+}
+
+function updatePieThickness(value: number) {
+  const thickness = Math.min(
+    MAX_PIE_RING_THICKNESS_PERCENT,
+    Math.max(pieMinimumThicknessPercent.value, value),
+  )
+  props.settings.pieInnerRadius = getPieInnerRadius(
+    props.settings.pieOuterRadius,
+    thickness,
+  )
+}
+
+function updatePieGap(value: number) {
+  props.settings.piePadAngle = Math.round(value * 0.12 * 10) / 10
+}
+
+function updatePieRadius(value: number) {
+  props.settings.pieBorderRadius = Math.round(value * 0.8)
+}
+
+function setPieRadiusByValue(enabled: boolean) {
+  props.settings.pieRoseType = enabled ? 'radius' : 'none'
+}
+
+function updatePieLabelSize(value: number) {
+  props.settings.pieLabelSize = Math.round((10 + value * 0.38) * 10) / 10
+}
+
+function setLineShape(shape: LineShape) {
+  props.settings.lineShape = shape
+  props.settings.smoothLines = shape === 'smooth'
+  props.settings.lineStep = shape === 'step' ? 'middle' : 'none'
+}
+
+function setShowLines(show: boolean) {
+  props.settings.showLines = show
+}
+
+function setShowLineSymbols(show: boolean) {
+  props.settings.showLineSymbols = show
+}
+
+function updateLineWidth(value: number) {
+  const width =
+    MIN_LINE_WIDTH_PX +
+    (value / 100) * (MAX_LINE_WIDTH_PX - MIN_LINE_WIDTH_PX)
+  props.settings.lineWidth = Math.round(width * 10) / 10
+}
+
+function updateLinePointSize(value: number) {
+  props.settings.lineSymbolSize = Math.round((2 + value * 0.28) * 10) / 10
+}
+
+function setPieNames(show: boolean) {
+  props.settings.showPieLabels = show
 }
 </script>
 
@@ -304,7 +445,10 @@ function updateBarGapPercent(event: Event) {
           v-for="typeChoice in typeChoices"
           :key="typeChoice.id"
           type="button"
-          :class="{ active: activeType === typeChoice.id }"
+          :class="[
+            { active: activeType === typeChoice.id },
+            `chart-type-${typeChoice.id}`,
+          ]"
           :aria-pressed="activeType === typeChoice.id"
           @click="selectType(typeChoice.id)"
         >
@@ -352,20 +496,281 @@ function updateBarGapPercent(event: Event) {
         <div class="new-design-palette-card">
           <span>Цвета</span>
           <div class="new-design-palette-list">
-            <FigmaColorInput
-              v-for="(color, index) in settings.palette.slice(0, 5)"
-              :key="index"
-              :model-value="color"
-              :opacity="settings.paletteOpacities[index] ?? 100"
-              :label="`Цвет ${index + 1}`"
-              :open="openPaletteIndex === index"
-              :popover-offset-y="-index * 48"
-              @open="openPaletteIndex = index"
-              @close="openPaletteIndex = null"
-              @update:model-value="updatePaletteColor(index, $event)"
-              @update:opacity="updatePaletteOpacity(index, $event)"
+            <div
+              v-for="entry in paletteEntries"
+              :key="entry.index"
+            >
+              <FigmaColorInput
+                :model-value="paletteColor(entry.index)"
+                :opacity="paletteOpacity(entry.index)"
+                :label="entry.label"
+                :open="openPaletteIndex === entry.index"
+                @open="openPaletteIndex = entry.index"
+                @close="openPaletteIndex = null"
+                @update:model-value="updatePaletteColor(entry.index, $event)"
+                @update:opacity="updatePaletteOpacity(entry.index, $event)"
+              />
+            </div>
+            <button
+              v-if="canAddPaletteColor"
+              class="new-design-add-color"
+              type="button"
+              @click="emit('add-palette-color')"
+            >
+              <span aria-hidden="true">＋</span>
+              Добавить цвет
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="circular" class="new-design-section">
+        <h3>{{ chartType === 'doughnut' ? 'Кольцо' : 'Круг' }}</h3>
+        <div class="new-design-card-stack">
+          <div class="new-design-range-row first">
+            <span>Размер</span>
+            <input
+              :value="settings.pieOuterRadius"
+              type="range"
+              min="30"
+              max="100"
+              aria-label="Размер круга"
+              :style="rangeStyle(settings.pieOuterRadius, 30, 100)"
+              @input="updatePieOuterRadius(Number(($event.target as HTMLInputElement).value))"
+            />
+            <FigmaPercentInput
+              :model-value="settings.pieOuterRadius"
+              label="Размер круга в процентах"
+              :minimum="30"
+              @update:model-value="updatePieOuterRadius"
             />
           </div>
+          <div v-if="chartType === 'doughnut'" class="new-design-range-row">
+            <span>Толщина кольца</span>
+            <input
+              :value="pieThicknessPercent"
+              type="range"
+              :min="pieMinimumThicknessPercent"
+              :max="MAX_PIE_RING_THICKNESS_PERCENT"
+              aria-label="Толщина кольца"
+              :aria-valuetext="`${Math.round(pieThicknessPercent)}%, минимум ${MIN_PIE_RING_THICKNESS_PX} px`"
+              :title="`Минимальная толщина — ${MIN_PIE_RING_THICKNESS_PX} px`"
+              :style="rangeStyle(pieThicknessPercent, pieMinimumThicknessPercent, MAX_PIE_RING_THICKNESS_PERCENT)"
+              @input="updatePieThickness(Number(($event.target as HTMLInputElement).value))"
+            />
+            <FigmaPercentInput
+              :model-value="Math.round(pieThicknessPercent)"
+              :label="`Толщина кольца в процентах, минимум ${MIN_PIE_RING_THICKNESS_PX} пикселя`"
+              :minimum="pieMinimumThicknessPercent"
+              :maximum="MAX_PIE_RING_THICKNESS_PERCENT"
+              @update:model-value="updatePieThickness"
+            />
+          </div>
+          <div class="new-design-range-row">
+            <span>Расстояние между секторами</span>
+            <input
+              :value="Math.round((settings.piePadAngle / 12) * 100)"
+              type="range"
+              min="0"
+              max="100"
+              aria-label="Расстояние между секторами"
+              :style="rangeStyle(settings.piePadAngle, 0, 12)"
+              @input="updatePieGap(Number(($event.target as HTMLInputElement).value))"
+            />
+            <FigmaPercentInput
+              :model-value="Math.round((settings.piePadAngle / 12) * 100)"
+              label="Расстояние между секторами"
+              @update:model-value="updatePieGap"
+            />
+          </div>
+          <div class="new-design-range-row">
+            <span>Скругление</span>
+            <input
+              :value="Math.round((settings.pieBorderRadius / 80) * 100)"
+              type="range"
+              min="0"
+              max="100"
+              aria-label="Скругление секторов"
+              :style="rangeStyle(settings.pieBorderRadius, 0, 80)"
+              @input="updatePieRadius(Number(($event.target as HTMLInputElement).value))"
+            />
+            <FigmaPercentInput
+              :model-value="Math.round((settings.pieBorderRadius / 80) * 100)"
+              label="Скругление секторов"
+              @update:model-value="updatePieRadius"
+            />
+          </div>
+          <label class="new-design-switch-row last">
+            <span>Радиус зависит от значения</span>
+            <input
+              :checked="settings.pieRoseType !== 'none'"
+              type="checkbox"
+              @change="setPieRadiusByValue(($event.target as HTMLInputElement).checked)"
+            />
+            <i aria-hidden="true" />
+          </label>
+        </div>
+        <ul v-if="pieWarnings.length" class="new-design-warnings" aria-live="polite">
+          <li v-for="warning in pieWarnings" :key="warning">{{ warning }}</li>
+        </ul>
+      </section>
+
+      <section v-if="chartType === 'line'" class="new-design-section">
+        <h3>Линии</h3>
+        <div class="new-design-card-stack">
+          <label class="new-design-switch-row first">
+            <span>Показывать линии</span>
+            <input
+              id="new-design-show-lines"
+              :checked="settings.showLines"
+              type="checkbox"
+              :aria-expanded="settings.showLines"
+              aria-controls="new-design-line-details"
+              @change="setShowLines(($event.target as HTMLInputElement).checked)"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <Transition name="new-design-disclosure">
+            <div
+              v-if="settings.showLines"
+              id="new-design-line-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <div class="new-design-range-row">
+                  <span>Толщина</span>
+                  <input
+                    :value="settings.lineWidth"
+                    type="range"
+                    :min="MIN_LINE_WIDTH_PX"
+                    :max="MAX_LINE_WIDTH_PX"
+                    step="0.5"
+                    aria-label="Толщина линий"
+                    :style="rangeStyle(settings.lineWidth, MIN_LINE_WIDTH_PX, MAX_LINE_WIDTH_PX)"
+                    @input="settings.lineWidth = Number(($event.target as HTMLInputElement).value)"
+                  />
+                  <FigmaPercentInput
+                    :model-value="Math.round(((settings.lineWidth - MIN_LINE_WIDTH_PX) / (MAX_LINE_WIDTH_PX - MIN_LINE_WIDTH_PX)) * 100)"
+                    label="Толщина линий"
+                    @update:model-value="updateLineWidth"
+                  />
+                </div>
+                <div class="new-design-control-row">
+                  <span>Форма</span>
+                  <div class="new-design-text-tabs three">
+                    <button
+                      v-for="choice in [
+                        { value: 'straight', label: 'Резкая' },
+                        { value: 'smooth', label: 'Плавная' },
+                        { value: 'step', label: 'Ступени' },
+                      ]"
+                      :key="choice.value"
+                      type="button"
+                      :class="{ active: settings.lineShape === choice.value }"
+                      @click="setLineShape(choice.value as LineShape)"
+                    >{{ choice.label }}</button>
+                  </div>
+                </div>
+                <div class="new-design-control-row">
+                  <span>Начертание</span>
+                  <div class="new-design-text-tabs four">
+                    <button
+                      v-for="choice in [
+                        { value: 'solid', label: 'Обычная' },
+                        { value: 'dashed', label: 'Штрихи' },
+                        { value: 'dotted', label: 'Точки' },
+                        { value: 'dashDotted', label: 'Штрих-точка' },
+                      ]"
+                      :key="choice.value"
+                      type="button"
+                      :class="{ active: settings.lineType === choice.value }"
+                      @click="settings.lineType = choice.value as LineStyleType"
+                    >{{ choice.label }}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+          <label class="new-design-switch-row">
+            <span>Показывать точки</span>
+            <input
+              id="new-design-show-points"
+              :checked="settings.showLineSymbols"
+              type="checkbox"
+              :aria-expanded="settings.showLineSymbols"
+              aria-controls="new-design-point-details"
+              @change="setShowLineSymbols(($event.target as HTMLInputElement).checked)"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <Transition name="new-design-disclosure">
+            <div
+              v-if="settings.showLineSymbols"
+              id="new-design-point-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <div class="new-design-range-row">
+                  <span>Размер точек</span>
+                  <input
+                    :value="settings.lineSymbolSize"
+                    type="range"
+                    min="2"
+                    max="30"
+                    aria-label="Размер точек"
+                    :style="rangeStyle(settings.lineSymbolSize, 2, 30)"
+                    @input="settings.lineSymbolSize = Number(($event.target as HTMLInputElement).value)"
+                  />
+                  <FigmaPercentInput
+                    :model-value="Math.round(((settings.lineSymbolSize - 2) / 28) * 100)"
+                    label="Размер точек"
+                    @update:model-value="updateLinePointSize"
+                  />
+                </div>
+              </div>
+            </div>
+          </Transition>
+          <label class="new-design-switch-row">
+            <span>Заливка под линиями</span>
+            <input
+              id="new-design-show-line-area"
+              v-model="settings.showLineArea"
+              type="checkbox"
+              :aria-expanded="settings.showLineArea"
+              aria-controls="new-design-line-area-details"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <Transition name="new-design-disclosure">
+            <div
+              v-if="settings.showLineArea"
+              id="new-design-line-area-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <div class="new-design-range-row">
+                  <span>Прозрачность заливки</span>
+                  <input
+                    v-model.number="settings.areaOpacity"
+                    type="range"
+                    min="0"
+                    max="100"
+                    aria-label="Прозрачность заливки"
+                    :style="rangeStyle(settings.areaOpacity, 0, 100)"
+                  />
+                  <FigmaPercentInput
+                    v-model="settings.areaOpacity"
+                    label="Прозрачность заливки"
+                  />
+                </div>
+              </div>
+            </div>
+          </Transition>
+          <label class="new-design-switch-row last">
+            <span>Линии сетки</span>
+            <input v-model="settings.showGridLines" type="checkbox" />
+            <i aria-hidden="true" />
+          </label>
         </div>
       </section>
 
@@ -382,17 +787,11 @@ function updateBarGapPercent(event: Event) {
               aria-label="Скругление колонок"
               :style="rangeStyle(settings.barRadius, 0, 120)"
             />
-            <div class="new-design-percent-input">
-              <input
-                :value="Math.round((settings.barRadius / 120) * 100)"
-                type="number"
-                min="0"
-                max="100"
-                aria-label="Скругление колонок в процентах"
-                @input="updateBarRadiusPercent"
-              />
-              <span>%</span>
-            </div>
+            <FigmaPercentInput
+              :model-value="Math.round((settings.barRadius / 120) * 100)"
+              label="Скругление колонок в процентах"
+              @update:model-value="updateBarRadiusPercent"
+            />
           </div>
           <div class="new-design-range-row">
             <span>Ширина</span>
@@ -404,17 +803,11 @@ function updateBarGapPercent(event: Event) {
               aria-label="Ширина колонок"
               :style="rangeStyle(settings.barMaxWidth, 20, 180)"
             />
-            <div class="new-design-percent-input">
-              <input
-                :value="Math.round(((settings.barMaxWidth - 20) / 160) * 100)"
-                type="number"
-                min="0"
-                max="100"
-                aria-label="Ширина колонок в процентах"
-                @input="updateBarWidthPercent"
-              />
-              <span>%</span>
-            </div>
+            <FigmaPercentInput
+              :model-value="Math.round(((settings.barMaxWidth - 20) / 160) * 100)"
+              label="Ширина колонок в процентах"
+              @update:model-value="updateBarWidthPercent"
+            />
           </div>
           <div class="new-design-range-row">
             <span>Расстояние между колонок</span>
@@ -426,33 +819,26 @@ function updateBarGapPercent(event: Event) {
               aria-label="Расстояние между колонками"
               :style="rangeStyle(settings.barGapPercent, 0, 100)"
             />
-            <div class="new-design-percent-input">
-              <input
-                :value="settings.barGapPercent"
-                type="number"
-                min="0"
-                max="100"
-                aria-label="Расстояние между колонками в процентах"
-                @input="updateBarGapPercent"
-              />
-              <span>%</span>
-            </div>
+            <FigmaPercentInput
+              :model-value="settings.barGapPercent"
+              label="Расстояние между колонками в процентах"
+              @update:model-value="updateBarGapPercent"
+            />
           </div>
           <div class="new-design-control-row">
             <span>Порядок колонок</span>
             <div class="new-design-icon-tabs" aria-label="Порядок колонок">
               <button
                 v-for="choice in [
-                  { value: 'normal', icon: columnsIcon, label: 'Обычный порядок' },
-                  { value: 'reverse', icon: orderReversedIcon, label: 'Обратный порядок' },
-                  { value: 'value', icon: orderRandomIcon, label: 'По значению' },
+                  { value: 'normal', icon: columnsIcon, label: 'От меньшей к большей' },
+                  { value: 'reverse', icon: orderReversedIcon, label: 'От большей к меньшей' },
+                  { value: 'value', icon: orderRandomIcon, label: 'В порядке таблицы' },
                 ]"
                 :key="choice.value"
                 type="button"
                 :class="{ active: settings.barOrder === choice.value }"
                 :aria-label="choice.label"
-                :disabled="choice.value === 'value' && !settings.barHorizontal"
-                :title="choice.value === 'value' && !settings.barHorizontal ? 'Сортировка по значению доступна для горизонтальных столбцов' : undefined"
+                :aria-pressed="settings.barOrder === choice.value"
                 @click="settings.barOrder = choice.value as BarOrder"
               >
                 <img :src="choice.icon" alt="" />
@@ -480,7 +866,83 @@ function updateBarGapPercent(event: Event) {
       <section class="new-design-section">
         <h3>Подписи и легенда</h3>
         <div class="new-design-card-stack">
-          <div class="new-design-control-row first">
+          <template v-if="circular">
+            <label class="new-design-switch-row first">
+              <span>Названия секторов</span>
+              <input
+                id="new-design-show-pie-labels"
+                :checked="settings.showPieLabels"
+                type="checkbox"
+                :aria-expanded="settings.showPieLabels"
+                aria-controls="new-design-pie-label-details"
+                @change="setPieNames(($event.target as HTMLInputElement).checked)"
+              />
+              <i aria-hidden="true" />
+            </label>
+            <Transition name="new-design-disclosure">
+              <div
+                v-if="settings.showPieLabels"
+                id="new-design-pie-label-details"
+                class="new-design-disclosure"
+              >
+                <div class="new-design-disclosure-content">
+                  <label class="new-design-switch-row">
+                    <span>Линии к названиям</span>
+                    <input v-model="settings.showPieLabelLines" type="checkbox" />
+                    <i aria-hidden="true" />
+                  </label>
+                  <div class="new-design-range-row">
+                    <span>Размер названий</span>
+                    <input
+                      :value="settings.pieLabelSize"
+                      type="range"
+                      min="10"
+                      max="48"
+                      step="0.5"
+                      aria-label="Размер названий секторов"
+                      :style="rangeStyle(settings.pieLabelSize, 10, 48)"
+                      @input="settings.pieLabelSize = Number(($event.target as HTMLInputElement).value)"
+                    />
+                    <FigmaPercentInput
+                      :model-value="Math.round(((settings.pieLabelSize - 10) / 38) * 100)"
+                      label="Размер названий секторов"
+                      @update:model-value="updatePieLabelSize"
+                    />
+                  </div>
+                </div>
+              </div>
+            </Transition>
+            <label class="new-design-switch-row">
+              <span>Проценты внутри</span>
+              <input v-model="settings.showPiePercentages" type="checkbox" />
+              <i aria-hidden="true" />
+            </label>
+            <label class="new-design-switch-row">
+              <span>Легенда</span>
+              <input v-model="settings.showLegend" type="checkbox" />
+              <i aria-hidden="true" />
+            </label>
+          </template>
+
+          <template v-if="chartType === 'line'">
+            <label class="new-design-switch-row first">
+              <span>Горизонтальные подписи</span>
+              <input v-model="settings.showXAxisLabels" type="checkbox" />
+              <i aria-hidden="true" />
+            </label>
+            <label class="new-design-switch-row">
+              <span>Вертикальная шкала</span>
+              <input v-model="settings.showYAxisLabels" type="checkbox" />
+              <i aria-hidden="true" />
+            </label>
+            <label class="new-design-switch-row">
+              <span>Легенда</span>
+              <input v-model="settings.showLegend" type="checkbox" />
+              <i aria-hidden="true" />
+            </label>
+          </template>
+
+          <div v-if="chartType === 'bar'" class="new-design-control-row first">
             <span>Выравнивание текста</span>
             <div class="new-design-icon-tabs" aria-label="Выравнивание текста">
               <button
@@ -514,22 +976,27 @@ function updateBarGapPercent(event: Event) {
               >Внутри</button>
             </div>
           </div>
-          <label class="new-design-switch-row">
+          <label v-if="chartType === 'bar'" class="new-design-switch-row">
             <span>Горизонтальные подписи</span>
             <input v-model="settings.showXAxisLabels" type="checkbox" />
             <i aria-hidden="true" />
           </label>
-          <label class="new-design-switch-row">
+          <label v-if="chartType === 'bar'" class="new-design-switch-row">
             <span>Вертикальные подписи</span>
             <input v-model="settings.showYAxisLabels" type="checkbox" />
             <i aria-hidden="true" />
           </label>
-          <label class="new-design-switch-row">
+          <label v-if="chartType === 'bar'" class="new-design-switch-row">
             <span>Легенда</span>
             <input v-model="settings.showLegend" type="checkbox" />
             <i aria-hidden="true" />
           </label>
-          <label class="new-design-switch-row last">
+          <label
+            class="new-design-switch-row last"
+            :class="{
+              first: chartType !== 'bar' && chartType !== 'line' && !circular,
+            }"
+          >
             <span>Заголовок</span>
             <input v-model="settings.showTitle" type="checkbox" />
             <i aria-hidden="true" />
@@ -543,6 +1010,9 @@ function updateBarGapPercent(event: Event) {
 <style scoped>
 .new-design-panel {
   --new-ui-accent: #5500eb;
+  --new-ui-switch-on: #4d0ae2;
+  --new-ui-switch-off: #ececec;
+  --new-ui-switch-thumb-border: #d1d1d1;
   width: 581px;
   min-height: 1676px;
   overflow: hidden;
@@ -731,6 +1201,10 @@ input:focus-visible {
   object-fit: contain;
 }
 
+.new-design-types button.chart-type-rows > span img {
+  transform: rotate(-90deg) scaleY(-1);
+}
+
 .new-design-types button.active > span {
   color: #fff;
 }
@@ -810,7 +1284,7 @@ input:focus-visible {
 }
 
 .new-design-preset:hover .new-design-dots i {
-  border-color: #ececec;
+  box-shadow: 0 0 0 2px #ececec;
 }
 
 .new-design-preset.active {
@@ -819,7 +1293,7 @@ input:focus-visible {
 }
 
 .new-design-preset.active .new-design-dots i {
-  border-color: #000;
+  box-shadow: 0 0 0 2px #000;
 }
 
 .new-design-preset:nth-child(1) {
@@ -856,8 +1330,8 @@ input:focus-visible {
   width: 20px;
   height: 20px;
   margin-right: -2px;
-  border: 2px solid #fff;
   border-radius: 50%;
+  box-shadow: 0 0 0 2px #fff;
 }
 
 .new-design-dots i:last-child {
@@ -866,6 +1340,7 @@ input:focus-visible {
 
 .new-design-palette-card {
   display: flex;
+  height: auto;
   min-height: 264px;
   justify-content: space-between;
   padding: 16px;
@@ -881,9 +1356,42 @@ input:focus-visible {
 
 .new-design-palette-list {
   display: flex;
-  width: 224px;
+  width: 219px;
   flex-direction: column;
   gap: 8px;
+}
+
+.new-design-add-color {
+  display: flex;
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid #ececec;
+  border-radius: 20px;
+  gap: 2px;
+  color: #000;
+  background: #fff;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.new-design-add-color > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 24px;
+}
+
+.new-design-add-color:hover {
+  background: #fafafa;
 }
 
 .new-design-color-row {
@@ -952,11 +1460,40 @@ input:focus-visible {
   gap: 2px;
 }
 
+.new-design-disclosure {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.new-design-disclosure-content {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.new-design-disclosure-enter-active,
+.new-design-disclosure-leave-active {
+  overflow: hidden;
+  transition:
+    grid-template-rows 180ms ease,
+    opacity 180ms ease;
+}
+
+.new-design-disclosure-enter-from,
+.new-design-disclosure-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
 .new-design-range-row,
 .new-design-control-row,
 .new-design-switch-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 176px 64px;
+  grid-template-columns: minmax(0, 1fr) 175px 66px;
   align-items: center;
   min-height: 72px;
   padding: 16px;
@@ -967,13 +1504,26 @@ input:focus-visible {
 }
 
 .new-design-range-row.first,
-.new-design-control-row.first {
+.new-design-control-row.first,
+.new-design-switch-row.first {
   border-radius: 26px 26px 4px 4px;
+}
+
+.new-design-range-row.disabled,
+.new-design-control-row.disabled,
+.new-design-switch-row.disabled {
+  color: #8d8b91;
+  cursor: not-allowed;
+}
+
+.new-design-range-row input:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .new-design-range-row input[type="range"] {
   appearance: none;
-  width: 176px;
+  width: 175px;
   height: 24px;
   min-height: 24px;
   padding: 0;
@@ -1016,45 +1566,21 @@ input:focus-visible {
   background: #fff;
 }
 
-.new-design-percent-input {
-  display: flex;
-  width: 64px;
-  height: 40px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #ececec;
-  border-radius: 10px;
-  line-height: 20px;
-}
-
-.new-design-percent-input input {
-  width: 3ch;
-  height: 38px;
-  min-height: 38px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  line-height: 20px;
-  text-align: right;
-  appearance: textfield;
-}
-
-.new-design-percent-input input::-webkit-inner-spin-button {
-  appearance: none;
-}
-
 .new-design-control-row {
   grid-template-columns: minmax(0, 1fr) 256px;
   gap: 8px;
 }
 
+.new-design-range-row.last,
 .new-design-control-row.last,
 .new-design-switch-row.last {
   border-radius: 4px 4px 26px 26px;
+}
+
+.new-design-range-row.first.last,
+.new-design-control-row.first.last,
+.new-design-switch-row.first.last {
+  border-radius: 26px;
 }
 
 .new-design-icon-tabs,
@@ -1077,6 +1603,24 @@ input:focus-visible {
   border-radius: 999px;
   color: var(--new-ui-accent);
   background: transparent;
+}
+
+.new-design-text-tabs.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.new-design-text-tabs.four {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.new-design-text-tabs.four button {
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.new-design-text-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .new-design-icon-tabs button {
@@ -1139,32 +1683,118 @@ input:focus-visible {
   position: relative;
   width: 52px;
   height: 26px;
-  border-radius: 100px;
-  background: #d8d8d8;
+  flex: 0 0 52px;
+  border-radius: 13px;
+  background: var(--new-ui-switch-off);
+  transition: background-color 160ms ease;
 }
 
 .new-design-switch-row i::after {
   position: absolute;
   top: 3px;
   left: 3px;
+  box-sizing: border-box;
   width: 20px;
   height: 20px;
+  border: 1px solid var(--new-ui-switch-thumb-border);
   border-radius: 50%;
   background: #fff;
   content: "";
-  transition: transform 160ms ease;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
 }
 
 .new-design-switch-row input:checked + i {
-  background: var(--new-ui-accent);
+  background: var(--new-ui-switch-on);
 }
 
 .new-design-switch-row input:checked + i::after {
+  border-color: transparent;
   transform: translateX(26px);
 }
 
 .new-design-switch-row input:focus-visible + i {
   outline: 3px solid color-mix(in srgb, var(--new-ui-accent) 34%, white);
   outline-offset: 2px;
+}
+
+.new-design-switch-row input:disabled + i {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.new-design-warnings {
+  display: flex;
+  margin: 0;
+  padding: 14px 18px 14px 34px;
+  border: 1px solid #f0c45b;
+  border-radius: 18px;
+  flex-direction: column;
+  gap: 8px;
+  color: #6d4b00;
+  background: #fff7df;
+  font-size: 14px;
+  line-height: 18px;
+}
+
+@media (max-width: 620px) {
+  .new-design-panel {
+    width: 100%;
+    min-height: 0;
+    padding-bottom: 64px;
+  }
+
+  .new-design-heading h2 {
+    font-size: 34px;
+    line-height: 42px;
+  }
+
+  .new-design-preset-scroll {
+    width: 100%;
+  }
+
+  .new-design-palette-card {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .new-design-palette-card > span {
+    padding-top: 0;
+  }
+
+  .new-design-palette-list {
+    width: 100%;
+    align-items: flex-end;
+  }
+
+  .new-design-range-row {
+    grid-template-columns: minmax(0, 1fr) 66px;
+  }
+
+  .new-design-range-row > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .new-design-range-row input[type="range"] {
+    width: 100%;
+  }
+
+  .new-design-control-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .new-design-icon-tabs,
+  .new-design-text-tabs {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-design-disclosure-enter-active,
+  .new-design-disclosure-leave-active {
+    transition-duration: 0.01ms;
+  }
 }
 </style>

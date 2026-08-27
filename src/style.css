@@ -338,8 +338,7 @@ td input {
   font-weight: 600;
 }
 
-.renderer-control,
-.pie-series-control {
+.renderer-control {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1099,14 +1098,8 @@ button:disabled {
   background: #653bb5;
 }
 
-.renderer-control select,
-.pie-series-control select {
+.renderer-control select {
   min-height: 32px;
-}
-
-.pie-series-control {
-  width: fit-content;
-  margin: 12px 0 4px;
 }
 
 .background-picker {
