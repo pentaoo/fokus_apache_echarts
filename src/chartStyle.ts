@@ -48,6 +48,7 @@ export interface ChartStyleConfig {
   chartPadding?: number
 
   showTitle?: boolean
+  titleAlignment?: LabelAlignment
   showLegend?: boolean
   legendPosition?: LegendPosition
   legendFontSize?: number
@@ -89,6 +90,7 @@ export interface ChartStyleConfig {
   showAxisTicks?: boolean
   gridLineColor?: string
   gridLineWidth?: number
+  axisOpacity?: number
   gridLineType?: LineStyleType
   axisLineColor?: string
   boundaryGap?: boolean
@@ -236,6 +238,7 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   chartPadding: 28,
 
   showTitle: true,
+  titleAlignment: 'center',
   showLegend: true,
   legendPosition: 'bottom',
   legendFontSize: 13,
@@ -277,6 +280,7 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   showAxisTicks: false,
   gridLineColor: '#2A2A31',
   gridLineWidth: 1,
+  axisOpacity: 100,
   gridLineType: 'solid',
   axisLineColor: '#3B3B44',
   boundaryGap: true,
@@ -428,7 +432,7 @@ function darkenHexColor(hex: string, percentage: number) {
 }
 
 function seriesDarkening(seriesIndex: number, seriesCount: number) {
-  return seriesCount > 1 ? Math.min(seriesIndex * 10, 90) : 0
+  return seriesCount > 1 ? Math.min(seriesIndex * 20, 90) : 0
 }
 
 function makeGradient(color: string, opacity: number, horizontal: boolean) {
@@ -579,13 +583,45 @@ function piePercentageFormatter() {
   )
 }
 
+function pieOutsideValueFormatter(showName: boolean) {
+  const formatter = (params: { name?: unknown; percent?: unknown }) => {
+    const percentage = Number(params.percent)
+    const value = Number.isFinite(percentage)
+      ? String(Math.round(percentage))
+      : ''
+    const name = String(params.name ?? '').trim()
+    return showName && name
+      ? `{name|${name}}\n{value|${value}}`
+      : `{value|${value}}`
+  }
+
+  return attachFormatterSource(
+    formatter,
+    `(params) => {
+  const percentage = Number(params.percent);
+  const value = Number.isFinite(percentage) ? String(Math.round(percentage)) : "";
+  const name = String(params.name ?? "").trim();
+  return ${showName ? 'name ? `{name|${name}}\\n{value|${value}}` : `{value|${value}}`' : '`{value|${value}}`'};
+}`,
+  )
+}
+
 function styleAxis(
   axis: EChartsOption,
   config: ResolvedChartStyle,
   dimension: 'x' | 'y',
+  centerVerticalBarCategoryLabels = false,
 ) {
   const isCategory = axis.type === 'category' || Array.isArray(axis.data)
-  const categoryInside = isCategory && config.barCategoryPosition === 'inside'
+  const verticalBarCategoryAxis =
+    isCategory && dimension === 'x' && centerVerticalBarCategoryLabels
+  const barCategoryAxis =
+    isCategory &&
+    (verticalBarCategoryAxis ||
+      config.barHorizontal ||
+      config.barArrangement === 'horizontal')
+  const categoryInside =
+    isCategory && config.barCategoryPosition === 'inside' && !verticalBarCategoryAxis
   const showLabels =
     dimension === 'x' ? config.showXAxisLabels : config.showYAxisLabels
   const labelSize =
@@ -628,11 +664,16 @@ function styleAxis(
       lineStyle: {
         ...axis.axisLine?.lineStyle,
         color: config.axisLineColor,
+        opacity: config.axisOpacity / 100,
       },
     },
     axisTick: {
       ...axis.axisTick,
       show: config.showAxisTicks,
+      lineStyle: {
+        ...axis.axisTick?.lineStyle,
+        opacity: config.axisOpacity / 100,
+      },
     },
     axisLabel: {
       ...axis.axisLabel,
@@ -641,7 +682,9 @@ function styleAxis(
       align: categoryInside
         ? 'left'
         : isCategory
-          ? dimension === 'x'
+          ? barCategoryAxis
+            ? 'center'
+            : dimension === 'x'
             ? horizontalCategoryAlign
             : config.labelAlignment
           : dimension === 'x'
@@ -649,9 +692,13 @@ function styleAxis(
             : 'right',
       verticalAlign: categoryInside ? 'middle' : axis.axisLabel?.verticalAlign,
       padding: categoryInside ? [0, 0, 0, 8] : axis.axisLabel?.padding,
-      color: isCategory
-        ? config.categoryLabelColor
-        : config.valueAxisLabelColor,
+      color:
+        categoryInside &&
+        (config.barHorizontal || config.barArrangement === 'horizontal')
+          ? '#FFFFFF'
+          : isCategory
+            ? config.categoryLabelColor
+            : config.valueAxisLabelColor,
       fontFamily: config.fontFamily,
       fontSize: labelSize,
       fontWeight: config.axisLabelWeight,
@@ -669,6 +716,7 @@ function styleAxis(
         ...axis.splitLine?.lineStyle,
         color: config.gridLineColor,
         width: config.gridLineWidth,
+        opacity: config.axisOpacity / 100,
         type: config.gridLineType,
       },
     },
@@ -732,7 +780,7 @@ function lineDashType(type: LineStyleType) {
   return type === 'dashDotted' ? [12, 6, 2, 6] : type
 }
 
-function minimumBarWidthForValues(
+export function getMinimumBarWidthForValues(
   series: EChartsOption,
   config: ResolvedChartStyle,
 ) {
@@ -863,9 +911,18 @@ function styleBarSeries(
           item !== null && typeof item === 'object' && !Array.isArray(item)
             ? item
             : { value: item }
+        const numericValue = barDatumNumber(source)
+        const stackedEndIndex = numericValue !== null && numericValue < 0
+          ? stackedBounds?.negativeEnd[dataIndex]
+          : stackedBounds?.positiveEnd[dataIndex]
+        const labelFallsInsideStack =
+          stackedBounds !== null &&
+          numericValue !== null &&
+          numericValue !== 0 &&
+          stackedEndIndex !== seriesIndex
         const itemBorderRadius = stackedBounds
           ? stackedBarBorderRadius(
-              barDatumNumber(source),
+              numericValue,
               dataIndex,
               seriesIndex,
               stackedBounds,
@@ -887,7 +944,7 @@ function styleBarSeries(
           label: {
             ...source.label,
             color:
-              config.barValuePosition === 'inside'
+              config.barValuePosition === 'inside' || labelFallsInsideStack
                 ? '#FFFFFF'
                 : itemColor,
           },
@@ -901,20 +958,10 @@ function styleBarSeries(
   const labelInside = config.barValuePosition === 'inside'
   const minimumBarWidth = horizontal
     ? 0
-    : minimumBarWidthForValues(series, config)
+    : getMinimumBarWidthForValues(series, config)
   const sourceMinimumBarWidth =
     typeof series.barMinWidth === 'number' ? series.barMinWidth : 0
-  const insidePosition = horizontal
-    ? config.labelAlignment === 'left'
-      ? 'insideLeft'
-      : config.labelAlignment === 'right'
-        ? 'insideRight'
-        : 'inside'
-    : config.labelAlignment === 'left'
-      ? 'insideTopLeft'
-      : config.labelAlignment === 'right'
-        ? 'insideTopRight'
-        : 'insideTop'
+  const insidePosition = horizontal ? 'inside' : 'insideTop'
 
   return {
     ...base,
@@ -950,17 +997,15 @@ function styleBarSeries(
         : horizontal
           ? 'right'
           : 'top',
-      distance: horizontal ? 10 : labelInside ? 0 : 6,
+      distance: horizontal ? (labelInside ? 0 : 10) : labelInside ? 0 : 6,
       padding: horizontal
-        ? series.label?.padding
+        ? labelInside
+          ? [0, 16, 0, 16]
+          : series.label?.padding ?? [0, 0, 0, 16]
         : labelInside
           ? [6, 4, 0, 4]
           : [0, 4, 0, 4],
-      align: labelInside
-        ? config.labelAlignment
-        : horizontal
-          ? 'left'
-          : 'center',
+      align: 'center',
       color: labelInside ? '#FFFFFF' : color,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
@@ -993,6 +1038,7 @@ function styleLineSeries(
     : series.areaStyle !== undefined
   const showLine = config.showLines
   const showPoints = config.showLineSymbols
+  const valueLabelInside = config.barValuePosition === 'inside'
   const smooth = config.presentationMode
     ? config.lineShape === 'smooth'
       ? 0.5
@@ -1016,9 +1062,11 @@ function styleLineSeries(
     ...base,
     smooth,
     ...(smooth ? { smoothMonotone: 'x' } : {}),
-    showSymbol: showPoints,
+    // ECharts attaches line labels to symbol elements. Keep zero-size symbols
+    // when values are enabled so labels remain visible without showing points.
+    showSymbol: showPoints || config.showValueLabels,
     symbol: config.lineSymbol,
-    symbolSize: config.lineSymbolSize,
+    symbolSize: showPoints ? config.lineSymbolSize : 0,
     step,
     lineStyle: {
       ...series.lineStyle,
@@ -1037,10 +1085,10 @@ function styleLineSeries(
     },
     label: {
       ...series.label,
-      show: config.presentationMode ? false : config.showValueLabels,
-      position: 'top',
-      align: config.labelAlignment,
-      color: config.textColor,
+      show: config.showValueLabels,
+      position: valueLabelInside ? 'inside' : 'top',
+      align: config.presentationMode ? 'center' : config.labelAlignment,
+      color: valueLabelInside ? '#FFFFFF' : color,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
       fontWeight: config.valueLabelWeight,
@@ -1106,6 +1154,11 @@ function stylePieSeries(
   const color = getPaletteColor(config, seriesIndex)
   const labelInSectorCenter = config.pieLabelPosition === 'center'
   const showNames = config.showPieLabels
+  const showValuesOutside =
+    config.presentationMode &&
+    config.showPiePercentages &&
+    config.barValuePosition === 'top'
+  const showPrimaryLabels = showNames || showValuesOutside
   const data = Array.isArray(series.data)
     ? series.data.map((item: unknown) =>
         item !== null && typeof item === 'object' && !Array.isArray(item)
@@ -1137,7 +1190,7 @@ function stylePieSeries(
     },
     label: {
       ...series.label,
-      show: showNames,
+      show: showPrimaryLabels,
       position: config.presentationMode
         ? 'outside'
         : labelInSectorCenter
@@ -1154,10 +1207,33 @@ function stylePieSeries(
       fontWeight: labelInSectorCenter
         ? config.valueLabelWeight
         : config.fontWeight,
+      ...(showValuesOutside
+        ? {
+            rich: {
+              ...series.label?.rich,
+              name: {
+                color: config.pieLabelColor,
+                fontFamily: config.fontFamily,
+                fontSize: config.pieLabelSize,
+                fontWeight: config.fontWeight,
+                lineHeight: Math.round(config.pieLabelSize * 1.2),
+              },
+              value: {
+                color: config.pieLabelColor,
+                fontFamily: config.fontFamily,
+                fontSize: config.valueLabelSize,
+                fontWeight: config.valueLabelWeight,
+                lineHeight: Math.round(config.valueLabelSize * 1.2),
+              },
+            },
+          }
+        : {}),
       ...(series.label?.formatter === undefined
         ? {
             formatter: config.presentationMode
-              ? '{b}'
+              ? showValuesOutside
+                ? pieOutsideValueFormatter(showNames)
+                : '{b}'
               : labelInSectorCenter
               ? valueFormatter(config)
               : pieFormatter(config),
@@ -1167,7 +1243,7 @@ function stylePieSeries(
     labelLine: {
       ...series.labelLine,
       show:
-        showNames &&
+        showPrimaryLabels &&
         config.showPieLabelLines &&
         (config.presentationMode || config.pieLabelPosition === 'outside'),
       length: 14,
@@ -1192,12 +1268,14 @@ function piePercentageSeries(
   config: ResolvedChartStyle,
 ): EChartsOption {
   const percentageFormatter = piePercentageFormatter()
+  const valueLabelInside = config.barValuePosition === 'inside'
   const data = Array.isArray(series.data)
-    ? series.data.map((item: unknown) => {
+    ? series.data.map((item: unknown, dataIndex: number) => {
         const source =
           item !== null && typeof item === 'object' && !Array.isArray(item)
             ? item as EChartsOption
             : { value: item }
+        const itemColor = getPaletteColor(config, dataIndex)
 
         return {
           ...source,
@@ -1210,13 +1288,21 @@ function piePercentageSeries(
           label: {
             ...source.label,
             show: true,
-            position: 'inside',
-            rotate: 'tangential',
+            position: valueLabelInside ? 'inside' : 'outside',
+            rotate: valueLabelInside ? 'tangential' : 0,
             formatter: percentageFormatter,
-            color: '#FFFFFF',
+            color: valueLabelInside ? '#FFFFFF' : itemColor,
             fontFamily: config.fontFamily,
-            fontSize: Math.min(24, config.valueLabelSize),
+            fontSize: config.valueLabelSize,
             fontWeight: config.valueLabelWeight,
+          },
+          labelLine: {
+            ...source.labelLine,
+            show: !valueLabelInside,
+            lineStyle: {
+              ...source.labelLine?.lineStyle,
+              color: itemColor,
+            },
           },
         }
       })
@@ -1242,15 +1328,20 @@ function piePercentageSeries(
     },
     label: {
       show: true,
-      position: 'inside',
-      rotate: 'tangential',
+      position: valueLabelInside ? 'inside' : 'outside',
+      rotate: valueLabelInside ? 'tangential' : 0,
       formatter: percentageFormatter,
-      color: '#FFFFFF',
+      color: valueLabelInside ? '#FFFFFF' : config.textColor,
       fontFamily: config.fontFamily,
-      fontSize: Math.min(24, config.valueLabelSize),
+      fontSize: config.valueLabelSize,
       fontWeight: config.valueLabelWeight,
     },
-    labelLine: { show: false },
+    labelLine: {
+      show: !valueLabelInside,
+      length: 10,
+      length2: 8,
+      smooth: 0.2,
+    },
     labelLayout: { hideOverlap: true },
     emphasis: { disabled: true, scale: false },
     blur: { disabled: true },
@@ -1566,8 +1657,10 @@ export function applyChartStyle(
     (config.barHorizontal || config.barArrangement === 'horizontal')
   const xAxisSource = horizontal ? option.yAxis : option.xAxis
   const yAxisSource = horizontal ? option.xAxis : option.yAxis
+  const centerVerticalBarCategoryLabels =
+    seriesSource.some((item) => item.type === 'bar') && !horizontal
   const xAxes = asArray(xAxisSource).map((axis) =>
-    styleAxis(axis, config, 'x'),
+    styleAxis(axis, config, 'x', centerVerticalBarCategoryLabels),
   )
   const yAxes = asArray(yAxisSource).map((axis) =>
     styleAxis(axis, config, 'y'),
@@ -1594,7 +1687,11 @@ export function applyChartStyle(
     if (item.type === 'pie') {
       const styledPie = stylePieSeries(item, index, config)
       series.push(styledPie)
-      if (config.presentationMode && config.showPiePercentages) {
+      if (
+        config.presentationMode &&
+        config.showPiePercentages &&
+        config.barValuePosition === 'inside'
+      ) {
         series.push(piePercentageSeries(styledPie, config))
       }
       return
@@ -1622,7 +1719,7 @@ export function applyChartStyle(
   const titles = titleSource.map((title) => ({
     ...title,
     show: config.showTitle,
-    left: title.left ?? config.labelAlignment,
+    left: config.titleAlignment,
     textStyle: {
       ...title.textStyle,
       color: config.textColor,
@@ -1726,6 +1823,7 @@ export function applyChartStyle(
             lineStyle: {
               ...option.radar.axisLine?.lineStyle,
               color: config.axisLineColor,
+              opacity: config.axisOpacity / 100,
             },
           },
           splitLine: {
@@ -1734,6 +1832,7 @@ export function applyChartStyle(
               ...option.radar.splitLine?.lineStyle,
               color: config.gridLineColor,
               width: config.gridLineWidth,
+              opacity: config.axisOpacity / 100,
               type: config.gridLineType,
             },
           },

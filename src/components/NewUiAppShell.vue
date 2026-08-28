@@ -8,13 +8,9 @@ import actionUpIcon from '../assets/new-ui/app-shell/action-up.svg'
 import actionCopyIcon from '../assets/new-ui/app-shell/action-copy.svg'
 import actionDeleteIcon from '../assets/new-ui/app-shell/action-delete.svg'
 import actionSparkleIcon from '../assets/new-ui/app-shell/action-sparkle.svg'
-import randomChartBars from '../assets/new-ui/random-chart-bars.svg'
-import randomChartSquiggle from '../assets/new-ui/random-chart-squiggle.svg'
-import randomChartStar from '../assets/new-ui/random-chart-star.svg'
 
 defineEmits<{
   'show-classic': []
-  'randomize': []
 }>()
 
 const slideDots = Array.from({ length: 10 }, (_, index) => index)
@@ -76,22 +72,6 @@ const isDataEditorOpen = ref(false)
         <slot name="chart" />
       </div>
       <div class="new-ui-chart-actions">
-        <button
-          class="new-ui-random-chart-button"
-          type="button"
-          @click="$emit('randomize')"
-        >
-          <span>Случайный график</span>
-          <i class="new-ui-random-squiggle" aria-hidden="true">
-            <img :src="randomChartSquiggle" alt="" />
-          </i>
-          <i class="new-ui-random-star" aria-hidden="true">
-            <img :src="randomChartStar" alt="" />
-          </i>
-          <i class="new-ui-random-bars" aria-hidden="true">
-            <img :src="randomChartBars" alt="" />
-          </i>
-        </button>
         <button
           class="new-ui-edit-data-button"
           type="button"
@@ -382,107 +362,6 @@ const isDataEditorOpen = ref(false)
   pointer-events: auto;
 }
 
-.new-ui-random-chart-button {
-  position: relative;
-  display: flex;
-  width: 330px;
-  height: 52px;
-  min-height: 52px;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  padding: 5px 14px 5px 10px;
-  border: 0;
-  border-radius: 91.772px;
-  color: #4d0ae2;
-  background:
-    radial-gradient(
-      ellipse 163px 60px at 45.9% 50%,
-      rgb(144 255 0 / 66%) 0%,
-      rgb(129 255 24 / 66%) 16.414%,
-      rgb(98 255 73 / 66%) 49.243%,
-      rgb(41 234 99 / 66%) 82.829%,
-      rgb(0 213 99 / 66%) 100%
-    );
-  font-family: "ALS Hauss", Arial, Helvetica, sans-serif;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.2;
-  pointer-events: auto;
-}
-
-.new-ui-random-chart-button:hover {
-  color: #4d0ae2;
-  filter: brightness(1.04);
-}
-
-.new-ui-random-chart-button:active {
-  transform: translateY(1px);
-}
-
-.new-ui-random-chart-button:focus-visible {
-  outline: 3px solid #4d0ae2;
-  outline-offset: 3px;
-}
-
-.new-ui-random-chart-button > span {
-  position: relative;
-  z-index: 1;
-  white-space: nowrap;
-}
-
-.new-ui-random-chart-button i {
-  position: absolute;
-  display: grid;
-  pointer-events: none;
-  place-items: center;
-}
-
-.new-ui-random-chart-button i img {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.new-ui-random-squiggle {
-  top: -52px;
-  left: -26.5px;
-  width: 155.549px;
-  height: 155.549px;
-}
-
-.new-ui-random-squiggle img {
-  max-width: 119.482px;
-  max-height: 119.482px;
-  transform: rotate(-22.01deg);
-}
-
-.new-ui-random-star {
-  top: -1px;
-  left: 236.5px;
-  width: 28.925px;
-  height: 28.925px;
-}
-
-.new-ui-random-star img {
-  max-width: 22.252px;
-  max-height: 22.252px;
-  transform: rotate(21.8deg);
-}
-
-.new-ui-random-bars {
-  top: 18px;
-  left: 254.5px;
-  width: 38.561px;
-  height: 36.598px;
-}
-
-.new-ui-random-bars img {
-  max-width: 30.784px;
-  max-height: 27.365px;
-  transform: rotate(21.06deg);
-}
-
 .new-ui-edit-data-button {
   height: 52px;
   min-height: 52px;
@@ -612,7 +491,6 @@ const isDataEditorOpen = ref(false)
     width: 100%;
   }
 
-  .new-ui-random-chart-button,
   .new-ui-edit-data-button {
     width: 100%;
     max-width: 330px;

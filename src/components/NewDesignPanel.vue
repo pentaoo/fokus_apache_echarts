@@ -31,7 +31,6 @@ import lineIcon from '../assets/new-ui/line.svg'
 import orderRandomIcon from '../assets/new-ui/order-random.svg'
 import orderReversedIcon from '../assets/new-ui/order-reversed.svg'
 import pieIcon from '../assets/new-ui/pie.svg'
-import randomIcon from '../assets/new-ui/random.svg'
 import rowsIcon from '../assets/new-ui/rows.svg'
 
 interface PaletteChoice {
@@ -54,6 +53,7 @@ const props = defineProps<{
   dataRowCount: number
   pieWarnings: string[]
   pieMaximumRadiusPx: number
+  barGapMaximum: number
 }>()
 
 const emit = defineEmits<{
@@ -122,6 +122,27 @@ const circular = computed(
   () => props.chartType === 'pie' || props.chartType === 'doughnut',
 )
 
+const valuesVisible = computed({
+  get: () =>
+    circular.value
+      ? props.settings.showPiePercentages
+      : props.settings.showValueLabels,
+  set: (value: boolean) => {
+    if (circular.value) {
+      props.settings.showPiePercentages = value
+      return
+    }
+    props.settings.showValueLabels = value
+  },
+})
+
+const axisElementsVisible = computed(
+  () =>
+    props.settings.showGridLines ||
+    props.settings.showAxisLines ||
+    props.settings.showAxisTicks,
+)
+
 const pieThicknessPercent = computed(() =>
   getPieThicknessPercent(
     props.settings.pieInnerRadius,
@@ -129,9 +150,14 @@ const pieThicknessPercent = computed(() =>
   ),
 )
 
+const pieMinimumThicknessPx = computed(() =>
+  Math.max(MIN_PIE_RING_THICKNESS_PX, props.settings.valueLabelSize + 16),
+)
+
 const pieMinimumThicknessPercent = computed(() =>
   getMinimumPieThicknessPercent(
     props.pieMaximumRadiusPx * (props.settings.pieOuterRadius / 100),
+    pieMinimumThicknessPx.value,
   ),
 )
 
@@ -300,9 +326,10 @@ function paletteOpacity(index: number) {
 }
 
 function rangeStyle(value: number, minimum: number, maximum: number) {
+  const span = maximum - minimum
   const progress = Math.min(
     1,
-    Math.max(0, (value - minimum) / (maximum - minimum)),
+    Math.max(0, span > 0 ? (value - minimum) / span : 0),
   )
   const thumbSize = 24
   const progressPercent = progress * 100
@@ -321,7 +348,7 @@ function updateBarWidthPercent(value: number) {
 }
 
 function updateBarGapPercent(value: number) {
-  props.settings.barGapPercent = value
+  props.settings.barGapPercent = Math.min(props.barGapMaximum, value)
 }
 
 function updatePieOuterRadius(value: number) {
@@ -370,6 +397,10 @@ function setPieRadiusByValue(enabled: boolean) {
 
 function updatePieLabelSize(value: number) {
   props.settings.pieLabelSize = Math.round((10 + value * 0.38) * 10) / 10
+}
+
+function updateValueLabelSize(value: number) {
+  props.settings.valueLabelSize = Math.round((10 + value * 0.38) * 10) / 10
 }
 
 function setLineShape(shape: LineShape) {
@@ -433,11 +464,11 @@ function setPieNames(show: boolean) {
         <button
           class="new-design-random"
           type="button"
-          aria-label="Случайный стиль"
-          title="Случайный стиль"
+          aria-label="Случайный график"
+          title="Случайный график"
           @click="emit('randomize')"
         >
-          <img :src="randomIcon" alt="" />
+          Случайный
         </button>
       </div>
       <div class="new-design-types">
@@ -457,8 +488,6 @@ function setPieNames(show: boolean) {
         </button>
       </div>
     </section>
-
-    <div class="new-design-divider" />
 
     <div class="new-design-settings">
       <section class="new-design-section colors-section">
@@ -493,34 +522,44 @@ function setPieNames(show: boolean) {
           </button>
         </div>
 
-        <div class="new-design-palette-card">
-          <span>Цвета</span>
-          <div class="new-design-palette-list">
-            <div
-              v-for="entry in paletteEntries"
-              :key="entry.index"
-            >
-              <FigmaColorInput
-                :model-value="paletteColor(entry.index)"
-                :opacity="paletteOpacity(entry.index)"
-                :label="entry.label"
-                :open="openPaletteIndex === entry.index"
-                @open="openPaletteIndex = entry.index"
-                @close="openPaletteIndex = null"
-                @update:model-value="updatePaletteColor(entry.index, $event)"
-                @update:opacity="updatePaletteOpacity(entry.index, $event)"
-              />
+        <div class="new-design-palette-stack">
+          <div
+            class="new-design-palette-card"
+            :class="{ 'has-gradient-toggle': chartType === 'bar' }"
+          >
+            <span>Цвета</span>
+            <div class="new-design-palette-list">
+              <div
+                v-for="entry in paletteEntries"
+                :key="entry.index"
+              >
+                <FigmaColorInput
+                  :model-value="paletteColor(entry.index)"
+                  :opacity="paletteOpacity(entry.index)"
+                  :label="entry.label"
+                  :open="openPaletteIndex === entry.index"
+                  @open="openPaletteIndex = entry.index"
+                  @close="openPaletteIndex = null"
+                  @update:model-value="updatePaletteColor(entry.index, $event)"
+                  @update:opacity="updatePaletteOpacity(entry.index, $event)"
+                />
+              </div>
+              <button
+                v-if="canAddPaletteColor"
+                class="new-design-add-color"
+                type="button"
+                @click="emit('add-palette-color')"
+              >
+                <span aria-hidden="true">＋</span>
+                Добавить цвет
+              </button>
             </div>
-            <button
-              v-if="canAddPaletteColor"
-              class="new-design-add-color"
-              type="button"
-              @click="emit('add-palette-color')"
-            >
-              <span aria-hidden="true">＋</span>
-              Добавить цвет
-            </button>
           </div>
+          <label v-if="chartType === 'bar'" class="new-design-switch-row last">
+            <span>Градиентная заливка</span>
+            <input v-model="settings.gradientBars" type="checkbox" />
+            <i aria-hidden="true" />
+          </label>
         </div>
       </section>
 
@@ -553,14 +592,14 @@ function setPieNames(show: boolean) {
               :min="pieMinimumThicknessPercent"
               :max="MAX_PIE_RING_THICKNESS_PERCENT"
               aria-label="Толщина кольца"
-              :aria-valuetext="`${Math.round(pieThicknessPercent)}%, минимум ${MIN_PIE_RING_THICKNESS_PX} px`"
-              :title="`Минимальная толщина — ${MIN_PIE_RING_THICKNESS_PX} px`"
+              :aria-valuetext="`${Math.round(pieThicknessPercent)}%, минимум ${Math.round(pieMinimumThicknessPx)} px`"
+              :title="`Минимальная толщина — ${Math.round(pieMinimumThicknessPx)} px`"
               :style="rangeStyle(pieThicknessPercent, pieMinimumThicknessPercent, MAX_PIE_RING_THICKNESS_PERCENT)"
               @input="updatePieThickness(Number(($event.target as HTMLInputElement).value))"
             />
             <FigmaPercentInput
               :model-value="Math.round(pieThicknessPercent)"
-              :label="`Толщина кольца в процентах, минимум ${MIN_PIE_RING_THICKNESS_PX} пикселя`"
+              :label="`Толщина кольца в процентах, минимум ${Math.round(pieMinimumThicknessPx)} пикселей`"
               :minimum="pieMinimumThicknessPercent"
               :maximum="MAX_PIE_RING_THICKNESS_PERCENT"
               @update:model-value="updatePieThickness"
@@ -730,7 +769,10 @@ function setPieNames(show: boolean) {
               </div>
             </div>
           </Transition>
-          <label class="new-design-switch-row">
+          <label
+            class="new-design-switch-row"
+            :class="{ last: !settings.showLineArea }"
+          >
             <span>Заливка под линиями</span>
             <input
               id="new-design-show-line-area"
@@ -748,7 +790,7 @@ function setPieNames(show: boolean) {
               class="new-design-disclosure"
             >
               <div class="new-design-disclosure-content">
-                <div class="new-design-range-row">
+                <div class="new-design-range-row last">
                   <span>Прозрачность заливки</span>
                   <input
                     v-model.number="settings.areaOpacity"
@@ -766,11 +808,6 @@ function setPieNames(show: boolean) {
               </div>
             </div>
           </Transition>
-          <label class="new-design-switch-row last">
-            <span>Линии сетки</span>
-            <input v-model="settings.showGridLines" type="checkbox" />
-            <i aria-hidden="true" />
-          </label>
         </div>
       </section>
 
@@ -815,13 +852,14 @@ function setPieNames(show: boolean) {
               v-model.number="settings.barGapPercent"
               type="range"
               min="0"
-              max="100"
+              :max="barGapMaximum"
               aria-label="Расстояние между колонками"
-              :style="rangeStyle(settings.barGapPercent, 0, 100)"
+              :style="rangeStyle(settings.barGapPercent, 0, barGapMaximum)"
             />
             <FigmaPercentInput
               :model-value="settings.barGapPercent"
               label="Расстояние между колонками в процентах"
+              :maximum="barGapMaximum"
               @update:model-value="updateBarGapPercent"
             />
           </div>
@@ -863,11 +901,123 @@ function setPieNames(show: boolean) {
         </div>
       </section>
 
+      <section
+        v-if="chartType === 'line' || chartType === 'bar'"
+        class="new-design-section"
+      >
+        <h3>Оси и сетка</h3>
+        <div class="new-design-card-stack">
+          <label class="new-design-switch-row first">
+            <span>Линии осей</span>
+            <input
+              v-model="settings.showAxisLines"
+              type="checkbox"
+              :aria-expanded="axisElementsVisible"
+              aria-controls="new-design-axis-opacity-details"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <label class="new-design-switch-row">
+            <span>Засечки</span>
+            <input
+              v-model="settings.showAxisTicks"
+              type="checkbox"
+              :aria-expanded="axisElementsVisible"
+              aria-controls="new-design-axis-opacity-details"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <label
+            class="new-design-switch-row"
+            :class="{ last: !axisElementsVisible }"
+          >
+            <span>Линии сетки</span>
+            <input
+              v-model="settings.showGridLines"
+              type="checkbox"
+              :aria-expanded="axisElementsVisible"
+              aria-controls="new-design-axis-opacity-details"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <Transition name="new-design-disclosure">
+            <div
+              v-if="axisElementsVisible"
+              id="new-design-axis-opacity-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <label class="new-design-range-row last">
+                  <span>Прозрачность</span>
+                  <input
+                    v-model.number="settings.axisOpacity"
+                    type="range"
+                    min="0"
+                    max="100"
+                    aria-label="Прозрачность линий осей, засечек и сетки"
+                    :style="rangeStyle(settings.axisOpacity, 0, 100)"
+                  />
+                  <FigmaPercentInput
+                    :model-value="settings.axisOpacity"
+                    label="Прозрачность линий осей, засечек и сетки в процентах"
+                    @update:model-value="settings.axisOpacity = $event"
+                  />
+                </label>
+              </div>
+            </div>
+          </Transition>
+        </div>
+      </section>
+
       <section class="new-design-section">
         <h3>Подписи и легенда</h3>
         <div class="new-design-card-stack">
+          <label class="new-design-switch-row first">
+            <span>Заголовок</span>
+            <input
+              id="new-design-show-title"
+              v-model="settings.showTitle"
+              type="checkbox"
+              :aria-expanded="settings.showTitle"
+              aria-controls="new-design-title-details"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <Transition name="new-design-disclosure">
+            <div
+              v-if="settings.showTitle"
+              id="new-design-title-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <div class="new-design-control-row">
+                  <span>Положение заголовка</span>
+                  <div
+                    class="new-design-icon-tabs"
+                    aria-label="Положение заголовка"
+                  >
+                    <button
+                      v-for="choice in [
+                        { value: 'left', icon: alignLeftIcon, label: 'По левому краю' },
+                        { value: 'center', icon: alignCenterIcon, label: 'По центру' },
+                        { value: 'right', icon: alignRightIcon, label: 'По правому краю' },
+                      ]"
+                      :key="choice.value"
+                      type="button"
+                      :class="[`align-${choice.value}`, { active: settings.titleAlignment === choice.value }]"
+                      :aria-label="choice.label"
+                      :aria-pressed="settings.titleAlignment === choice.value"
+                      @click="settings.titleAlignment = choice.value as LabelAlignment"
+                    >
+                      <img :src="choice.icon" alt="" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
           <template v-if="circular">
-            <label class="new-design-switch-row first">
+            <label class="new-design-switch-row">
               <span>Названия секторов</span>
               <input
                 id="new-design-show-pie-labels"
@@ -912,20 +1062,10 @@ function setPieNames(show: boolean) {
                 </div>
               </div>
             </Transition>
-            <label class="new-design-switch-row">
-              <span>Проценты внутри</span>
-              <input v-model="settings.showPiePercentages" type="checkbox" />
-              <i aria-hidden="true" />
-            </label>
-            <label class="new-design-switch-row">
-              <span>Легенда</span>
-              <input v-model="settings.showLegend" type="checkbox" />
-              <i aria-hidden="true" />
-            </label>
           </template>
 
           <template v-if="chartType === 'line'">
-            <label class="new-design-switch-row first">
+            <label class="new-design-switch-row">
               <span>Горизонтальные подписи</span>
               <input v-model="settings.showXAxisLabels" type="checkbox" />
               <i aria-hidden="true" />
@@ -935,47 +1075,66 @@ function setPieNames(show: boolean) {
               <input v-model="settings.showYAxisLabels" type="checkbox" />
               <i aria-hidden="true" />
             </label>
-            <label class="new-design-switch-row">
-              <span>Легенда</span>
-              <input v-model="settings.showLegend" type="checkbox" />
-              <i aria-hidden="true" />
-            </label>
           </template>
 
-          <div v-if="chartType === 'bar'" class="new-design-control-row first">
-            <span>Выравнивание текста</span>
-            <div class="new-design-icon-tabs" aria-label="Выравнивание текста">
-              <button
-                v-for="choice in [
-                  { value: 'left', icon: alignLeftIcon, label: 'По левому краю' },
-                  { value: 'center', icon: alignCenterIcon, label: 'По центру' },
-                  { value: 'right', icon: alignRightIcon, label: 'По правому краю' },
-                ]"
-                :key="choice.value"
-                type="button"
-                :class="[`align-${choice.value}`, { active: settings.labelAlignment === choice.value }]"
-                :aria-label="choice.label"
-                @click="settings.labelAlignment = choice.value as LabelAlignment"
-              >
-                <img :src="choice.icon" alt="" />
-              </button>
-            </div>
-          </div>
-          <div v-if="chartType === 'bar'" class="new-design-control-row">
+          <label class="new-design-switch-row">
             <span>Значения</span>
-            <div class="new-design-text-tabs">
-              <button
-                type="button"
-                :class="{ active: settings.barValuePosition === 'top' }"
-                @click="settings.barValuePosition = 'top' as BarValuePosition"
-              >Снаружи</button>
-              <button
-                type="button"
-                :class="{ active: settings.barValuePosition === 'inside' }"
-                @click="settings.barValuePosition = 'inside' as BarValuePosition"
-              >Внутри</button>
+            <input
+              v-model="valuesVisible"
+              type="checkbox"
+              :aria-expanded="valuesVisible"
+              aria-controls="new-design-value-details"
+            />
+            <i aria-hidden="true" />
+          </label>
+          <Transition name="new-design-disclosure">
+            <div
+              v-if="valuesVisible"
+              id="new-design-value-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <div class="new-design-control-row">
+                  <span>Расположение значения</span>
+                  <div
+                    class="new-design-text-tabs"
+                    aria-label="Расположение значения"
+                  >
+                    <button
+                      type="button"
+                      :class="{ active: settings.barValuePosition === 'top' }"
+                      :aria-pressed="settings.barValuePosition === 'top'"
+                      @click="settings.barValuePosition = 'top' as BarValuePosition"
+                    >Снаружи</button>
+                    <button
+                      type="button"
+                      :class="{ active: settings.barValuePosition === 'inside' }"
+                      :aria-pressed="settings.barValuePosition === 'inside'"
+                      @click="settings.barValuePosition = 'inside' as BarValuePosition"
+                    >Внутри</button>
+                  </div>
+                </div>
+                <div class="new-design-range-row">
+                  <span>Размер значений</span>
+                  <input
+                    :value="settings.valueLabelSize"
+                    type="range"
+                    min="10"
+                    max="48"
+                    step="0.5"
+                    aria-label="Размер значений"
+                    :style="rangeStyle(settings.valueLabelSize, 10, 48)"
+                    @input="settings.valueLabelSize = Number(($event.target as HTMLInputElement).value)"
+                  />
+                  <FigmaPercentInput
+                    :model-value="Math.round(((settings.valueLabelSize - 10) / 38) * 100)"
+                    label="Размер значений в процентах"
+                    @update:model-value="updateValueLabelSize"
+                  />
+                </div>
+              </div>
             </div>
-          </div>
+          </Transition>
           <label v-if="chartType === 'bar'" class="new-design-switch-row">
             <span>Горизонтальные подписи</span>
             <input v-model="settings.showXAxisLabels" type="checkbox" />
@@ -986,19 +1145,9 @@ function setPieNames(show: boolean) {
             <input v-model="settings.showYAxisLabels" type="checkbox" />
             <i aria-hidden="true" />
           </label>
-          <label v-if="chartType === 'bar'" class="new-design-switch-row">
+          <label class="new-design-switch-row last">
             <span>Легенда</span>
             <input v-model="settings.showLegend" type="checkbox" />
-            <i aria-hidden="true" />
-          </label>
-          <label
-            class="new-design-switch-row last"
-            :class="{
-              first: chartType !== 'bar' && chartType !== 'line' && !circular,
-            }"
-          >
-            <span>Заголовок</span>
-            <input v-model="settings.showTitle" type="checkbox" />
             <i aria-hidden="true" />
           </label>
         </div>
@@ -1109,8 +1258,7 @@ input:focus-visible {
 }
 
 .new-design-type-section {
-  height: 172px;
-  padding: 10px 20px;
+  padding: 32px 20px 0;
 }
 
 .new-design-section-heading {
@@ -1130,17 +1278,39 @@ input:focus-visible {
 }
 
 .new-design-random {
-  width: 46px;
+  --new-design-random-background:
+    radial-gradient(
+      ellipse 58px 29px at 45.9% 50%,
+      rgb(144 255 0 / 66%) 0%,
+      rgb(137 255 12 / 66%) 8.207%,
+      rgb(129 255 24 / 66%) 16.414%,
+      rgb(114 255 49 / 66%) 32.829%,
+      rgb(98 255 73 / 66%) 49.243%,
+      rgb(83 255 98 / 66%) 65.658%,
+      rgb(41 234 99 / 66%) 82.829%,
+      rgb(21 223 99 / 66%) 91.414%,
+      rgb(10 218 99 / 66%) 95.707%,
+      rgb(0 213 99 / 66%) 100%
+    ),
+    #fff;
+  display: flex;
+  width: 108px;
   height: 24px;
-  border-radius: 999px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 16px;
+  border-radius: 41px;
   color: var(--new-ui-accent);
-  font-size: 22px;
-  line-height: 24px;
+  background: var(--new-design-random-background);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
-.new-design-random img {
-  width: 46px;
-  height: 24px;
+.new-design-random:hover {
+  background: var(--new-design-random-background);
+  filter: brightness(1.03);
 }
 
 .new-design-types {
@@ -1214,18 +1384,11 @@ input:focus-visible {
   filter: brightness(0) invert(1);
 }
 
-.new-design-divider {
-  height: 48px;
-  margin: 0 36px;
-  border-top: 1px solid transparent;
-  background: linear-gradient(#ececec, #ececec) center / 100% 1px no-repeat;
-}
-
 .new-design-settings {
   display: flex;
   flex-direction: column;
   gap: 32px;
-  padding: 10px 20px 0;
+  padding: 32px 20px 0;
 }
 
 .new-design-section {
@@ -1348,6 +1511,16 @@ input:focus-visible {
   background: #fff;
   font-size: 16px;
   line-height: 20px;
+}
+
+.new-design-palette-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.new-design-palette-card.has-gradient-toggle {
+  border-radius: 26px 26px 4px 4px;
 }
 
 .new-design-palette-card > span {

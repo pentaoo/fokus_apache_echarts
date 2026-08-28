@@ -1,5 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import colorizeIcon from '../assets/new-ui/colorize.svg'
+
+interface EyeDropperResult {
+  sRGBHex: string
+}
+
+interface EyeDropperInstance {
+  open: (options?: { signal?: AbortSignal }) => Promise<EyeDropperResult>
+}
+
+type EyeDropperConstructor = new () => EyeDropperInstance
 
 const props = defineProps<{
   modelValue: string
@@ -18,6 +29,7 @@ const emit = defineEmits<{
 const root = ref<HTMLElement | null>(null)
 const popover = ref<HTMLElement | null>(null)
 const saturationField = ref<HTMLElement | null>(null)
+const opacityInput = ref<HTMLInputElement | null>(null)
 const draft = ref(props.modelValue.replace('#', '').toUpperCase())
 const opacityDraft = ref(String(Math.round(clamp(props.opacity))))
 const editingOpacity = ref(false)
@@ -26,7 +38,11 @@ const saturation = ref(50)
 const brightness = ref(88)
 const pendingInternalColor = ref<string | null>(null)
 const popoverPosition = ref({ left: -181, top: -5 })
+const eyeDropperSupported = ref(false)
+const pickingScreenColor = ref(false)
 let positionObserver: ResizeObserver | null = null
+let eyeDropperAbortController: AbortController | null = null
+let stopOpacityScrub: (() => void) | null = null
 
 function clamp(value: number, minimum = 0, maximum = 100) {
   return Math.min(maximum, Math.max(minimum, value))
@@ -128,6 +144,54 @@ function updateOpacityDraft(event: Event) {
   emit('update:opacity', value)
 }
 
+function setOpacity(value: number) {
+  const nextValue = Math.round(clamp(value))
+  opacityDraft.value = String(nextValue)
+  emit('update:opacity', nextValue)
+}
+
+function startOpacityScrub(event: PointerEvent) {
+  if (event.button !== 0 || !event.isPrimary) return
+
+  event.preventDefault()
+  stopOpacityScrub?.()
+
+  const startX = event.clientX
+  const startY = event.clientY
+  const startOpacity = props.opacity
+  let isScrubbing = false
+
+  const move = (moveEvent: PointerEvent) => {
+    const horizontalDistance = moveEvent.clientX - startX
+    const verticalDistance = startY - moveEvent.clientY
+    const distance =
+      Math.abs(horizontalDistance) >= Math.abs(verticalDistance)
+        ? horizontalDistance
+        : verticalDistance
+
+    if (!isScrubbing && Math.abs(distance) < 3) return
+    isScrubbing = true
+    setOpacity(startOpacity + distance / 5)
+  }
+
+  const finish = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    stopOpacityScrub = null
+
+    if (!isScrubbing) {
+      opacityInput.value?.focus({ preventScroll: true })
+      opacityInput.value?.select()
+    }
+  }
+
+  stopOpacityScrub = finish
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', finish, { once: true })
+  window.addEventListener('pointercancel', finish, { once: true })
+}
+
 function finishOpacityEditing() {
   if (opacityDraft.value === '') {
     opacityDraft.value = String(Math.round(clamp(props.opacity)))
@@ -144,6 +208,38 @@ function closeOutside(event: PointerEvent) {
 function toggleOpen() {
   if (props.open) emit('close')
   else emit('open')
+}
+
+function getEyeDropperConstructor() {
+  return (window as Window & { EyeDropper?: EyeDropperConstructor }).EyeDropper
+}
+
+async function pickColorFromScreen() {
+  const EyeDropper = getEyeDropperConstructor()
+  if (!EyeDropper || pickingScreenColor.value) return
+
+  eyeDropperAbortController?.abort()
+  eyeDropperAbortController = new AbortController()
+  pickingScreenColor.value = true
+
+  try {
+    const result = await new EyeDropper().open({
+      signal: eyeDropperAbortController.signal,
+    })
+    const color = normalizeHex(result.sRGBHex)
+    if (!color) return
+    draft.value = color.slice(1)
+    pendingInternalColor.value = color
+    hexToHsv(color)
+    emit('update:modelValue', color)
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      console.warn('Не удалось выбрать цвет с экрана.', error)
+    }
+  } finally {
+    pickingScreenColor.value = false
+    eyeDropperAbortController = null
+  }
 }
 
 function updatePopoverPosition() {
@@ -192,12 +288,19 @@ function updatePopoverPosition() {
 const pureHue = computed(() => `hsl(${hue.value} 100% 50%)`)
 const sliderThumbRadius = 12
 const sliderThumbInset = sliderThumbRadius
-const sliderThumbTravel = 164 - sliderThumbInset * 2
+const hueTrackWidth = 124
+const alphaTrackWidth = 164
 const hueTrackPosition = computed(
-  () => sliderThumbInset + ((360 - hue.value) / 360) * sliderThumbTravel,
+  () =>
+    sliderThumbInset +
+    ((360 - hue.value) / 360) *
+      (hueTrackWidth - sliderThumbInset * 2),
 )
 const alphaTrackPosition = computed(
-  () => sliderThumbInset + (props.opacity / 100) * sliderThumbTravel,
+  () =>
+    sliderThumbInset +
+    (props.opacity / 100) *
+      (alphaTrackWidth - sliderThumbInset * 2),
 )
 const transparentColor = computed(() => {
   const normalized = normalizeHex(props.modelValue) ?? '#71C1E3'
@@ -247,6 +350,7 @@ watch(
 )
 
 onMounted(() => {
+  eyeDropperSupported.value = Boolean(getEyeDropperConstructor())
   document.addEventListener('pointerdown', closeOutside)
   window.addEventListener('resize', updatePopoverPosition)
   positionObserver = new ResizeObserver(updatePopoverPosition)
@@ -258,6 +362,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopOpacityScrub?.()
+  eyeDropperAbortController?.abort()
   document.removeEventListener('pointerdown', closeOutside)
   window.removeEventListener('resize', updatePopoverPosition)
   positionObserver?.disconnect()
@@ -284,8 +390,13 @@ onBeforeUnmount(() => {
         @keydown.enter.prevent="applyDraft"
       />
     </div>
-    <div class="figma-color-opacity">
+    <div
+      class="figma-color-opacity"
+      title="Потяните, чтобы изменить непрозрачность"
+      @pointerdown="startOpacityScrub"
+    >
       <input
+        ref="opacityInput"
         v-model="opacityDraft"
         type="text"
         inputmode="numeric"
@@ -322,22 +433,34 @@ onBeforeUnmount(() => {
           }"
         />
       </div>
-      <label
-        class="figma-hue-track"
-        :style="{
-          '--thumb-position': `${hueTrackPosition}px`,
-          '--thumb-background': pureHue,
-        }"
-      >
-        <span class="visually-hidden">Оттенок</span>
-        <input
-          v-model.number="hue"
-          type="range"
-          min="0"
-          max="360"
-          @input="emitHsvColor"
-        />
-      </label>
+      <div class="figma-hue-row">
+        <button
+          class="figma-eyedropper"
+          type="button"
+          :disabled="!eyeDropperSupported || pickingScreenColor"
+          :aria-label="pickingScreenColor ? 'Выбор цвета с экрана' : 'Взять цвет с экрана'"
+          :title="eyeDropperSupported ? 'Взять цвет с экрана' : 'Пипетка не поддерживается браузером'"
+          @click="pickColorFromScreen"
+        >
+          <img :src="colorizeIcon" alt="" />
+        </button>
+        <label
+          class="figma-hue-track"
+          :style="{
+            '--thumb-position': `${hueTrackPosition}px`,
+            '--thumb-background': pureHue,
+          }"
+        >
+          <span class="visually-hidden">Оттенок</span>
+          <input
+            v-model.number="hue"
+            type="range"
+            min="0"
+            max="360"
+            @input="emitHsvColor"
+          />
+        </label>
+      </div>
       <label
         class="figma-alpha-track"
         :style="{
@@ -424,6 +547,8 @@ onBeforeUnmount(() => {
   min-width: 0;
   padding: 0 8px;
   border-left: 1px solid #ececec;
+  cursor: ew-resize;
+  touch-action: none;
 }
 
 .open .figma-color-opacity {
@@ -437,6 +562,7 @@ onBeforeUnmount(() => {
   padding: 0;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  cursor: ew-resize;
 }
 
 .figma-color-opacity span {
@@ -497,6 +623,54 @@ onBeforeUnmount(() => {
   flex: 0 0 24px;
 }
 
+.figma-hue-row {
+  display: flex;
+  width: 164px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+}
+
+.figma-eyedropper {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.figma-eyedropper img {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.figma-eyedropper:hover:not(:disabled) {
+  background: rgb(255 255 255 / 14%);
+}
+
+.figma-eyedropper:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.figma-eyedropper:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.figma-hue-track {
+  width: 124px;
+}
+
 .figma-hue-track::before,
 .figma-alpha-track::before {
   position: absolute;
@@ -509,6 +683,8 @@ onBeforeUnmount(() => {
 }
 
 .figma-hue-track::before {
+  left: 0;
+  width: 124px;
   background: linear-gradient(270deg, #f00, #ffae00 10%, #bfff00 20%, #00ff26 30%, #00ff99 40%, #00ffd9 50%, #006aff 60%, #5500ff 70%, #b200ff 80%, #ff00ae 90%, #ff0004);
 }
 
@@ -547,6 +723,7 @@ onBeforeUnmount(() => {
 }
 
 .figma-hue-track input {
+  width: 124px;
   direction: rtl;
 }
 

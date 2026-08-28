@@ -23,12 +23,14 @@ import NewDesignPanel from './components/NewDesignPanel.vue'
 import NewUiAppShell from './components/NewUiAppShell.vue'
 import {
   applyChartStyle,
+  getMinimumBarWidthForValues,
   getMinimumPieThicknessPercent,
   getPieInnerRadius,
   getPieThicknessPercent,
   MAX_LINE_WIDTH_PX,
   MAX_PIE_RING_THICKNESS_PERCENT,
   MIN_LINE_WIDTH_PX,
+  MIN_PIE_RING_THICKNESS_PX,
 } from './chartStyle'
 import type {
   AnimationEasing,
@@ -94,8 +96,8 @@ type StyleSettings = ResolvedChartStyle
 
 const initialCategories = ['Апрель', 'Май', 'Июнь', 'Июль', 'Август']
 const initialSeries = [
-  { id: 1, name: 'Средняя температура', values: [12, 19, 22, 24, 22] },
-  { id: 2, name: 'Серия 2', values: [16, 14, 18, 20, 17] },
+  { id: 1, name: 'Москва', values: [12, 19, 22, 24, 22] },
+  { id: 2, name: 'Санкт-Петербург', values: [16, 14, 18, 20, 17] },
 ]
 
 const chartTypes: Array<{ value: ChartType; label: string }> = [
@@ -228,6 +230,7 @@ function selectNewUiChartKind(kind: NewUiChartKind) {
     : createNewUiStylePreset(kind)
   styleSettings.value = {
     ...nextSettings,
+    ...(kind === 'rows' ? { barCategoryPosition: 'inside' as const } : {}),
     palette,
     paletteOpacities,
   }
@@ -400,6 +403,7 @@ function formatCss(settings: StyleSettings) {
 
   /* Легенда и tooltip */
   --chart-show-title: ${Number(settings.showTitle)};
+  --chart-title-align: ${settings.titleAlignment};
   --chart-show-legend: ${Number(settings.showLegend)};
   --chart-legend-position: ${settings.legendPosition};
   --chart-legend-font-size: ${settings.legendFontSize}px;
@@ -437,6 +441,7 @@ function formatCss(settings: StyleSettings) {
   --chart-show-axis-ticks: ${Number(settings.showAxisTicks)};
   --chart-grid-line-color: ${settings.gridLineColor};
   --chart-grid-line-width: ${settings.gridLineWidth}px;
+  --chart-axis-opacity: ${settings.axisOpacity}%;
   --chart-grid-line-type: ${settings.gridLineType};
   --chart-axis-line-color: ${settings.axisLineColor};
   --chart-boundary-gap: ${Number(settings.boundaryGap)};
@@ -640,6 +645,8 @@ function applyCssCode(value: string) {
     ['y-axis-label-margin', 'yAxisLabelMargin', -60, 60],
     ['value-decimals', 'valueDecimals', 0, 4],
     ['grid-line-width', 'gridLineWidth', 1, 8],
+    ['grid-line-opacity', 'axisOpacity', 0, 100],
+    ['axis-opacity', 'axisOpacity', 0, 100],
     ['bar-gap', 'barGapPercent', 0, 100],
     ['bar-series-gap', 'barSeriesGapPercent', -100, 100],
     ['bar-radius', 'barRadius', 0, 120],
@@ -754,6 +761,7 @@ function applyCssCode(value: string) {
       'elasticOut',
     ]],
     ['legend-position', 'legendPosition', ['top', 'bottom', 'left', 'right']],
+    ['title-align', 'titleAlignment', ['left', 'center', 'right']],
     ['label-align', 'labelAlignment', ['left', 'center', 'right']],
     ['value-format', 'valueFormat', ['number', 'percent', 'compact']],
     ['grid-line-type', 'gridLineType', ['solid', 'dashed', 'dotted']],
@@ -893,6 +901,39 @@ function hslToHex(hue: number, saturation: number, lightness: number) {
     .join('')}`
 }
 
+function approximateTextWidth(text: string, fontSize: number) {
+  return Array.from(text).reduce(
+    (width, character) =>
+      width + (/[MWЖШЩЮЫФмшщюы]/.test(character) ? 0.82 : 0.58) * fontSize,
+    0,
+  )
+}
+
+function topLegendFitsTitle(legendItems: string[], showTitle: boolean) {
+  const scale = newUiChartScale.value
+  const stageWidth = chartStageSize.value.width
+  const legendFontSize = Math.max(
+    11,
+    Math.round(styleSettings.value.legendFontSize * scale),
+  )
+  const legendWidth = legendItems.reduce(
+    (width, item) =>
+      width +
+      approximateTextWidth(item, legendFontSize) +
+      (styleSettings.value.legendItemSize + styleSettings.value.legendGap) * scale,
+    0,
+  )
+  const legendLeft = (stageWidth - legendWidth) / 2
+  if (legendLeft < 0) return false
+  if (!showTitle || !chartTitle.value.trim()) return true
+
+  const titleWidth = approximateTextWidth(
+    chartTitle.value.trim(),
+    Math.max(18, Math.round(24 * scale)),
+  )
+  return titleWidth + 24 * scale <= legendLeft
+}
+
 function randomizeChartStyle() {
   const baseHue = randomInteger(0, 359)
   const harmony = [0, 28, 58, 142, 178, 214, 264, 310, 336]
@@ -905,6 +946,7 @@ function randomizeChartStyle() {
   )
   const presentation = styleSettings.value.presentationMode
   const currentType = chartType.value
+  const currentKind = activeNewUiChartKind()
   const pieOuterRadius = randomInteger(64, 92)
   const pieInnerRadius =
     currentType === 'doughnut'
@@ -915,8 +957,39 @@ function randomizeChartStyle() {
     'smooth',
     'step',
   ])
-  const showLines = randomBoolean(0.82)
-  const showLineSymbols = randomBoolean(0.5)
+  let showLines = randomBoolean(0.82)
+  let showLineSymbols = randomBoolean(0.5)
+  if (currentType === 'line' && !showLines && !showLineSymbols) {
+    if (randomBoolean(0.7)) showLines = true
+    else showLineSymbols = true
+  }
+  const showTitle = randomBoolean(0.88)
+  const showLegend = presentation && currentType === 'line'
+    ? true
+    : randomBoolean(0.72)
+  let labelAlignment = randomChoice<LabelAlignment>([
+    'left',
+    'center',
+    'right',
+  ])
+  let titleAlignment = labelAlignment
+  let legendPosition: LegendPosition = presentation && currentType === 'line'
+    ? 'top'
+    : randomChoice<LegendPosition>(['top', 'bottom', 'left', 'right'])
+
+  if (currentType === 'doughnut') {
+    legendPosition = topLegendFitsTitle(categories.value, showTitle) && randomBoolean()
+      ? 'top'
+      : 'left'
+    if (legendPosition === 'top') labelAlignment = 'left'
+    if (legendPosition === 'top') titleAlignment = 'left'
+  } else if (currentKind === 'rows') {
+    const seriesNames = dataSeries.value.map((series) => series.name)
+    legendPosition =
+      topLegendFitsTitle(seriesNames, showTitle) && randomBoolean()
+        ? 'top'
+        : 'bottom'
+  }
 
   styleSettings.value = {
     ...styleSettings.value,
@@ -947,18 +1020,11 @@ function randomizeChartStyle() {
     showValueLabels: presentation && currentType === 'line'
       ? false
       : randomBoolean(0.48),
-    labelAlignment: randomChoice<LabelAlignment>([
-      'left',
-      'center',
-      'right',
-    ]),
-    showTitle: randomBoolean(0.88),
-    showLegend: presentation && currentType === 'line'
-      ? true
-      : randomBoolean(0.72),
-    legendPosition: presentation && currentType === 'line'
-      ? 'top'
-      : randomChoice<LegendPosition>(['top', 'bottom', 'left', 'right']),
+    labelAlignment,
+    titleAlignment,
+    showTitle,
+    showLegend,
+    legendPosition,
     showTooltip: presentation ? false : true,
     showGridLines: randomBoolean(0.34),
     showAxisLines: randomBoolean(0.28),
@@ -968,7 +1034,6 @@ function randomizeChartStyle() {
     barArrangement: randomChoice<BarArrangement>([
       'grouped',
       'stacked',
-      'horizontal',
     ]),
     barGapPercent: randomInteger(8, 58),
     barRadius: randomInteger(0, 110),
@@ -976,7 +1041,9 @@ function randomizeChartStyle() {
     barMaxWidth: randomInteger(42, 150),
     barOpacity: randomInteger(72, 100),
     barValuePosition: randomChoice<BarValuePosition>(['inside', 'top']),
-    barCategoryPosition: randomChoice<BarCategoryPosition>(['axis', 'inside']),
+    barCategoryPosition: currentKind === 'rows'
+      ? 'inside'
+      : randomChoice<BarCategoryPosition>(['axis', 'inside']),
     colorBarsByData: randomBoolean(0.76),
     commonBarColor: randomBoolean(0.18),
     gradientBars: randomBoolean(0.48),
@@ -999,6 +1066,7 @@ function randomizeChartStyle() {
     pieInnerRadius,
     pieOuterRadius,
     piePadAngle: randomInteger(0, 8),
+    pieBorderRadius: randomInteger(0, 80),
     pieStartAngle: randomInteger(0, 12) * 30,
     pieClockwise: randomBoolean(),
     pieRoseType: randomChoice<PieRoseType>(['none', 'none', 'radius']),
@@ -1137,7 +1205,7 @@ const rawOption = computed<ChartOption>(() => {
     ? {
         title: {
           text: chartTitle.value.trim(),
-          left: styleSettings.value.labelAlignment,
+          left: styleSettings.value.titleAlignment,
         },
       }
     : {}
@@ -1272,22 +1340,104 @@ const newUiChartScale = computed(() => {
   return Math.min(1.35, Math.max(0.4, scale || 1))
 })
 
-const newUiPieTitleReserve = computed(() =>
-  styleSettings.value.showTitle && chartTitle.value.trim()
-    ? Math.round(58 * newUiChartScale.value)
-    : 0,
-)
+const newUiPieTopReserve = computed(() => {
+  const titleReserve =
+    styleSettings.value.showTitle && chartTitle.value.trim()
+      ? Math.round(58 * newUiChartScale.value)
+      : 0
+  const kind = activeNewUiChartKind()
+  const legendReserve =
+    (kind === 'pie' || kind === 'doughnut') &&
+    styleSettings.value.showLegend &&
+    styleSettings.value.legendPosition === 'top'
+      ? Math.round(48 * newUiChartScale.value)
+      : 0
+
+  return Math.max(titleReserve, legendReserve)
+})
 
 const newUiPieAvailableHeight = computed(() =>
-  Math.max(120, chartStageSize.value.height - newUiPieTitleReserve.value),
+  Math.max(120, chartStageSize.value.height - newUiPieTopReserve.value),
 )
+
+const newUiPieLegendSideReserve = computed(() => {
+  const kind = activeNewUiChartKind()
+  if (
+    (kind !== 'pie' && kind !== 'doughnut') ||
+    !styleSettings.value.showLegend ||
+    (styleSettings.value.legendPosition !== 'left' &&
+      styleSettings.value.legendPosition !== 'right')
+  ) {
+    return 0
+  }
+
+  const fontSize = Math.max(11, Math.round(12 * newUiChartScale.value))
+  const widestItem = Math.max(
+    0,
+    ...categories.value.map((category) => approximateTextWidth(category, fontSize)),
+  )
+  return Math.min(
+    chartStageSize.value.width * 0.3,
+    Math.max(96 * newUiChartScale.value, widestItem + 46 * newUiChartScale.value),
+  )
+})
 
 const newUiPieMaximumRadius = computed(() =>
   Math.max(
     1,
-    Math.min(chartStageSize.value.width, newUiPieAvailableHeight.value) / 2,
+    Math.min(
+      chartStageSize.value.width - 2 * newUiPieLegendSideReserve.value,
+      newUiPieAvailableHeight.value,
+    ) / 2,
   ),
 )
+
+const barGapMaximum = computed(() => {
+  if (!isNewUi.value || chartType.value !== 'bar') return 100
+
+  const settings = styleSettings.value
+  const horizontal =
+    settings.barHorizontal || settings.barArrangement === 'horizontal'
+  const titleReserve =
+    settings.showTitle && chartTitle.value.trim()
+      ? Math.round(52 * newUiChartScale.value)
+      : 0
+  const categoryLength = horizontal
+    ? Math.max(1, chartStageSize.value.height - titleReserve)
+    : Math.max(1, chartStageSize.value.width)
+  const bandSize = categoryLength / Math.max(1, categories.value.length)
+  const categoryLabelInside =
+    horizontal &&
+    settings.showYAxisLabels &&
+    settings.barCategoryPosition === 'inside'
+  const valueLabelInside =
+    settings.showValueLabels && settings.barValuePosition === 'inside'
+
+  if (!categoryLabelInside && !valueLabelInside) return 100
+
+  const categoryLabelThickness = categoryLabelInside
+    ? settings.yAxisLabelSize * 1.15 + 8
+    : 0
+  const valueLabelThickness = valueLabelInside
+    ? settings.valueLabelSize * 1.15 + 8
+    : 0
+  const visibleSeriesCount = settings.barArrangement === 'stacked'
+    ? 1
+    : Math.max(1, dataSeries.value.length)
+  const seriesGapRatio = Math.max(-0.99, settings.barSeriesGapPercent / 100)
+  const occupiedBars =
+    visibleSeriesCount +
+    Math.max(0, visibleSeriesCount - 1) * seriesGapRatio
+  const requiredBandSize = Math.max(
+    categoryLabelThickness,
+    valueLabelThickness * occupiedBars,
+  )
+
+  return Math.min(
+    100,
+    Math.max(0, Math.floor((1 - requiredBandSize / bandSize) * 100)),
+  )
+})
 
 const newUiPieOuterRadius = computed(
   () =>
@@ -1296,7 +1446,13 @@ const newUiPieOuterRadius = computed(
 )
 
 const newUiPieMinimumThickness = computed(() =>
-  getMinimumPieThicknessPercent(newUiPieOuterRadius.value),
+  getMinimumPieThicknessPercent(
+    newUiPieOuterRadius.value,
+    Math.max(
+      MIN_PIE_RING_THICKNESS_PX,
+      styleSettings.value.valueLabelSize + 16,
+    ),
+  ),
 )
 
 // ECharts сдвигает pie-label с position="inside" на 3 px наружу.
@@ -1369,21 +1525,130 @@ watch(
   { flush: 'sync' },
 )
 
+watch(
+  [barGapMaximum, () => styleSettings.value.barGapPercent],
+  ([maximum, current]) => {
+    if (current <= maximum) return
+    styleSettings.value.barGapPercent = maximum
+  },
+  { flush: 'sync' },
+)
+
+watch(
+  [isNewUi, chartType, () => styleSettings.value.barHorizontal],
+  () => {
+    if (
+      !isNewUi.value ||
+      chartType.value !== 'bar' ||
+      !styleSettings.value.barHorizontal ||
+      styleSettings.value.barCategoryPosition === 'inside'
+    ) {
+      return
+    }
+    styleSettings.value.barCategoryPosition = 'inside'
+  },
+  { flush: 'sync', immediate: true },
+)
+
 const newUiOption = computed<ChartOption>(() => {
   const settingsSnapshot = JSON.parse(styleRevision.value) as StyleSettings
   const scale = newUiChartScale.value
   const kind = activeNewUiChartKind()
+  const rowsLegendItems = dataSeries.value.map((series) => series.name)
+  const rowsTopLegendIsSafe =
+    kind === 'rows' &&
+    settingsSnapshot.showLegend &&
+    settingsSnapshot.legendPosition === 'top' &&
+    topLegendFitsTitle(rowsLegendItems, settingsSnapshot.showTitle)
+  const rowsLegendPosition: 'top' | 'bottom' = rowsTopLegendIsSafe
+    ? 'top'
+    : 'bottom'
+  const categoryCount = Math.max(1, categories.value.length)
+  const titleReserve =
+    settingsSnapshot.showTitle && chartTitle.value.trim()
+      ? Math.round(52 * scale)
+      : 0
+  const legendTopReserve =
+    kind === 'rows' &&
+    settingsSnapshot.showLegend &&
+    rowsLegendPosition === 'top'
+      ? Math.round(44 * scale)
+      : 0
+  const legendBottomReserve =
+    kind === 'rows' &&
+    settingsSnapshot.showLegend &&
+    rowsLegendPosition === 'bottom'
+      ? Math.round(44 * scale)
+      : 0
+  const categoryAxisLength = kind === 'rows'
+    ? Math.max(
+        1,
+        chartStageSize.value.height -
+          Math.max(titleReserve, legendTopReserve) -
+          legendBottomReserve,
+      )
+    : Math.max(1, chartStageSize.value.width)
+  const categoryBandSize = categoryAxisLength / categoryCount
+  const occupiedCategoryBand =
+    categoryBandSize *
+    (1 - Math.min(100, Math.max(0, settingsSnapshot.barGapPercent)) / 100)
+  const visibleBarCount = settingsSnapshot.barArrangement === 'stacked'
+    ? 1
+    : Math.max(1, dataSeries.value.length)
+  const seriesGapRatio = Math.max(
+    -0.99,
+    settingsSnapshot.barSeriesGapPercent / 100,
+  )
+  const occupiedBarUnits =
+    visibleBarCount + Math.max(0, visibleBarCount - 1) * seriesGapRatio
+  const automaticBarThickness = occupiedCategoryBand / occupiedBarUnits
+  const scaledValueLabelSize = Math.round(
+    settingsSnapshot.valueLabelSize * scale,
+  )
+  const scaledBarSettings: StyleSettings = {
+    ...settingsSnapshot,
+    valueLabelSize: scaledValueLabelSize,
+  }
+  const minimumBarThickness = kind === 'columns'
+    ? Math.max(
+        2 * scale,
+        ...dataSeries.value.map((series) =>
+          getMinimumBarWidthForValues(
+            { data: series.values },
+            scaledBarSettings,
+          ),
+        ),
+      )
+    : 2 * scale
+  const requestedBarThickness =
+    settingsSnapshot.barWidth > 0
+      ? settingsSnapshot.barWidth * scale
+      : settingsSnapshot.barMaxWidth * scale
+  const actualBarThickness = Math.max(
+    minimumBarThickness,
+    Math.min(requestedBarThickness, automaticBarThickness),
+  )
+  const proportionalBarRadius =
+    (actualBarThickness / 2) *
+    (Math.min(120, Math.max(0, settingsSnapshot.barRadius)) / 120)
   const styled = applyChartStyle(rawOption.value, {
     ...settingsSnapshot,
+    barCategoryPosition:
+      kind === 'rows' ? 'inside' : settingsSnapshot.barCategoryPosition,
+    barRadius: proportionalBarRadius,
     backgroundColor: 'transparent',
     textColor: '#000000',
     mutedTextColor: '#000000',
     xAxisLabelSize: Math.round(settingsSnapshot.xAxisLabelSize * scale),
     yAxisLabelSize: Math.round(settingsSnapshot.yAxisLabelSize * scale),
-    valueLabelSize: Math.round(settingsSnapshot.valueLabelSize * scale),
+    valueLabelSize: scaledValueLabelSize,
     pieLabelSize: Math.round(settingsSnapshot.pieLabelSize * scale),
     xAxisLabelMargin: Math.round(settingsSnapshot.xAxisLabelMargin * scale),
     yAxisLabelMargin: Math.round(settingsSnapshot.yAxisLabelMargin * scale),
+    barWidth:
+      settingsSnapshot.barWidth > 0
+        ? Math.round(settingsSnapshot.barWidth * scale)
+        : 0,
     barMaxWidth: Math.round(settingsSnapshot.barMaxWidth * scale),
   })
 
@@ -1411,27 +1676,53 @@ const newUiOption = computed<ChartOption>(() => {
     styled[valueAxisKey] = Array.isArray(source) ? axes : axes[0]
 
     if (kind === 'rows') {
-      const titleReserve =
-        settingsSnapshot.showTitle && chartTitle.value.trim()
-          ? Math.round(52 * scale)
-          : 0
-      const availableHeight = Math.max(
-        180,
-        chartStageSize.value.height - titleReserve,
-      )
-      const figmaAspectRatio = 366 / 444
-      const plotWidth = Math.min(
-        chartStageSize.value.width,
-        availableHeight * figmaAspectRatio,
-      )
+      const categoryAxisSource = styled.yAxis
+      const categoryAxes = (
+        Array.isArray(categoryAxisSource)
+          ? categoryAxisSource
+          : [categoryAxisSource]
+      ).map((axis) => {
+        const {
+          min: _minimum,
+          max: _maximum,
+          interval: _interval,
+          ...categoryAxis
+        } = axis ?? {}
 
+        return {
+          ...categoryAxis,
+          type: 'category',
+          data: [...categories.value],
+          boundaryGap: true,
+        }
+      })
+      styled.yAxis = Array.isArray(categoryAxisSource)
+        ? categoryAxes
+        : categoryAxes[0]
+
+      const {
+        width: _gridWidth,
+        height: _gridHeight,
+        ...responsiveGrid
+      } = styled.grid ?? {}
       styled.grid = {
-        ...(styled.grid ?? {}),
+        ...responsiveGrid,
         left: 0,
-        right: 'auto',
-        top: titleReserve,
-        bottom: 0,
-        width: Math.round(plotWidth),
+        right: 0,
+        top: Math.max(titleReserve, legendTopReserve),
+        bottom: legendBottomReserve,
+      }
+
+      if (settingsSnapshot.showLegend && styled.legend && !Array.isArray(styled.legend)) {
+        styled.legend = {
+          ...styled.legend,
+          left: 'center',
+          right: undefined,
+          top: rowsLegendPosition === 'top' ? Math.round(18 * scale) : undefined,
+          bottom:
+            rowsLegendPosition === 'bottom' ? Math.round(18 * scale) : undefined,
+          orient: 'horizontal',
+        }
       }
     } else {
       styled.grid = {
@@ -1441,8 +1732,24 @@ const newUiOption = computed<ChartOption>(() => {
     }
   }
 
+  if (kind === 'line') {
+    const source = styled.xAxis
+    const axes = (Array.isArray(source) ? source : [source]).map((axisValue) => {
+      const axis = (axisValue ?? {}) as Record<string, unknown>
+      const axisLabel = (axis.axisLabel ?? {}) as Record<string, unknown>
+      return {
+        ...axis,
+        axisLabel: {
+          ...axisLabel,
+          align: 'center',
+        },
+      }
+    })
+    styled.xAxis = Array.isArray(source) ? axes : axes[0]
+  }
+
   if (kind === 'pie' || kind === 'doughnut') {
-    const titleReserve = newUiPieTitleReserve.value
+    const titleReserve = newUiPieTopReserve.value
     const availableHeight = newUiPieAvailableHeight.value
     const outerRadius =
       newUiPieMaximumRadius.value *
@@ -1478,7 +1785,7 @@ const newUiOption = computed<ChartOption>(() => {
 
       return {
         ...(series ?? {}),
-        center: ['50%', centerY],
+        center: [centerX, centerY],
         radius: [outerRadius * innerRatio, outerRadius],
         ...(percentageLayer
           ? { labelLayout: centerPieInsideLabel(centerX, centerY) }
@@ -1498,6 +1805,7 @@ const newUiOption = computed<ChartOption>(() => {
     styled.title = {
       ...styled.title,
       top: 0,
+      left: settingsSnapshot.titleAlignment,
       textStyle: {
         ...(styled.title.textStyle ?? {}),
         fontSize: Math.round(24 * scale),
@@ -1553,7 +1861,6 @@ async function copyOption() {
   <NewUiAppShell
     v-if="isNewUi"
     @show-classic="uiDesignMode = 'classic'"
-    @randomize="randomizeChartStyle"
   >
     <template #settings>
       <NewDesignPanel
@@ -1565,6 +1872,7 @@ async function copyOption() {
         :data-row-count="categories.length"
         :pie-warnings="pieWarnings"
         :pie-maximum-radius-px="newUiPieMaximumRadius"
+        :bar-gap-maximum="barGapMaximum"
         @update:chart-title="chartTitle = $event"
         @select-chart-type="selectNewUiChartType"
         @select-columns-bar="selectColumnBar"
@@ -2494,24 +2802,6 @@ async function copyOption() {
                   </option>
                 </select>
               </label>
-              <div class="choice-row">
-                <span>Выравнивание</span>
-                <div class="segmented-control" aria-label="Выравнивание подписей">
-                  <button
-                    v-for="choice in [
-                      { value: 'left', label: 'Слева' },
-                      { value: 'center', label: 'Центр' },
-                      { value: 'right', label: 'Справа' },
-                    ]"
-                    :key="choice.value"
-                    type="button"
-                    :class="{ active: styleSettings.labelAlignment === choice.value }"
-                    @click="styleSettings.labelAlignment = choice.value as LabelAlignment"
-                  >
-                    {{ choice.label }}
-                  </button>
-                </div>
-              </div>
               <label class="select-control">
                 <span>Формат значений</span>
                 <select
@@ -2744,6 +3034,17 @@ async function copyOption() {
                     max="8"
                   />
                   <output>{{ styleSettings.gridLineWidth }} px</output>
+                </label>
+                <label class="range-control">
+                  <span>Прозрачность</span>
+                  <input
+                    v-model.number="styleSettings.axisOpacity"
+                    :disabled="!styleSettings.showGridLines && !styleSettings.showAxisLines && !styleSettings.showAxisTicks"
+                    type="range"
+                    min="0"
+                    max="100"
+                  />
+                  <output>{{ styleSettings.axisOpacity }}%</output>
                 </label>
                 <label class="select-control">
                   <span>Тип линий сетки</span>
@@ -3007,6 +3308,7 @@ async function copyOption() {
           :data-row-count="categories.length"
           :pie-warnings="pieWarnings"
           :pie-maximum-radius-px="newUiPieMaximumRadius"
+          :bar-gap-maximum="barGapMaximum"
           @update:chart-title="chartTitle = $event"
           @select-chart-type="selectNewUiChartType"
           @select-columns-bar="selectColumnBar"
