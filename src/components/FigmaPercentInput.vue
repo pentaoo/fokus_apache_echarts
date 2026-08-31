@@ -77,7 +77,7 @@ watch(
 .figma-percent-input {
   display: flex;
   width: 66px;
-  height: 40px;
+  height: 42px;
   min-width: 66px;
   align-items: center;
   justify-content: flex-end;
@@ -93,8 +93,8 @@ watch(
   flex: 1 1 auto;
   width: 0;
   min-width: 0;
-  height: 38px;
-  min-height: 38px;
+  height: 40px;
+  min-height: 40px;
   padding: 0;
   border: 0;
   border-radius: 0;

@@ -14,7 +14,7 @@ export type BarValuePosition = 'inside' | 'top'
 export type BarCategoryPosition = 'axis' | 'inside'
 export type LineStep = 'none' | 'start' | 'middle' | 'end'
 export type LineShape = 'straight' | 'smooth' | 'step'
-export type LineStyleType = 'solid' | 'dashed' | 'dotted' | 'dashDotted'
+export type LineStyleType = 'solid' | 'dashed' | 'dotted'
 export type PieRoseType = 'none' | 'radius' | 'area'
 export type PieLabelPosition = 'outside' | 'inside' | 'center'
 export type LegendPosition = 'top' | 'bottom' | 'left' | 'right'
@@ -182,7 +182,7 @@ export interface ChartStyleConfig {
 export type ResolvedChartStyle = Required<ChartStyleConfig>
 
 export const MIN_LINE_WIDTH_PX = 1
-export const MAX_LINE_WIDTH_PX = 120
+export const MAX_LINE_WIDTH_PX = 96
 export const MIN_PIE_RING_THICKNESS_PX = 32
 export const MAX_PIE_RING_THICKNESS_PERCENT = 99
 
@@ -568,27 +568,12 @@ function pieFormatter(config: ResolvedChartStyle) {
   )
 }
 
-function piePercentageFormatter() {
-  const formatter = (params: { percent?: unknown }) => {
-    const percentage = Number(params.percent)
-    return Number.isFinite(percentage) ? String(Math.round(percentage)) : ''
-  }
-
-  return attachFormatterSource(
-    formatter,
-    `(params) => {
-  const percentage = Number(params.percent);
-  return Number.isFinite(percentage) ? String(Math.round(percentage)) : "";
-}`,
-  )
-}
-
-function pieOutsideValueFormatter(showName: boolean) {
-  const formatter = (params: { name?: unknown; percent?: unknown }) => {
-    const percentage = Number(params.percent)
-    const value = Number.isFinite(percentage)
-      ? String(Math.round(percentage))
-      : ''
+function pieOutsideValueFormatter(
+  showName: boolean,
+  config: ResolvedChartStyle,
+) {
+  const formatter = (params: { name?: unknown; value?: unknown }) => {
+    const value = formatNumber(params.value, config)
     const name = String(params.name ?? '').trim()
     return showName && name
       ? `{name|${name}}\n{value|${value}}`
@@ -598,8 +583,11 @@ function pieOutsideValueFormatter(showName: boolean) {
   return attachFormatterSource(
     formatter,
     `(params) => {
-  const percentage = Number(params.percent);
-  const value = Number.isFinite(percentage) ? String(Math.round(percentage)) : "";
+  const value = ((inputValue) => {${numberFormattingSource(
+    'inputValue',
+    config,
+  )}
+  })(params.value);
   const name = String(params.name ?? "").trim();
   return ${showName ? 'name ? `{name|${name}}\\n{value|${value}}` : `{value|${value}}`' : '`{value|${value}}`'};
 }`,
@@ -776,8 +764,10 @@ function seriesStates(
   }
 }
 
-function lineDashType(type: LineStyleType) {
-  return type === 'dashDotted' ? [12, 6, 2, 6] : type
+function lineDashType(type: LineStyleType, lineWidth: number) {
+  // A zero-length dash with a round cap renders as a circle. Placing the
+  // centers 1.75 diameters apart leaves a 0.75-diameter visible gap.
+  return type === 'dotted' ? [0, lineWidth * 1.75] : type
 }
 
 export function getMinimumBarWidthForValues(
@@ -961,7 +951,7 @@ function styleBarSeries(
     : getMinimumBarWidthForValues(series, config)
   const sourceMinimumBarWidth =
     typeof series.barMinWidth === 'number' ? series.barMinWidth : 0
-  const insidePosition = horizontal ? 'inside' : 'insideTop'
+  const insidePosition = horizontal ? 'insideRight' : 'insideTop'
 
   return {
     ...base,
@@ -997,15 +987,15 @@ function styleBarSeries(
         : horizontal
           ? 'right'
           : 'top',
-      distance: horizontal ? (labelInside ? 0 : 10) : labelInside ? 0 : 6,
+      distance: horizontal ? (labelInside ? 0 : 8) : labelInside ? 0 : 6,
       padding: horizontal
         ? labelInside
-          ? [0, 16, 0, 16]
-          : series.label?.padding ?? [0, 0, 0, 16]
+          ? [0, 16, 0, 0]
+          : series.label?.padding ?? [0, 0, 0, 8]
         : labelInside
-          ? [6, 4, 0, 4]
+          ? [12, 4, 0, 4]
           : [0, 4, 0, 4],
-      align: 'center',
+      align: horizontal ? (labelInside ? 'right' : 'left') : 'center',
       color: labelInside ? '#FFFFFF' : color,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
@@ -1072,7 +1062,7 @@ function styleLineSeries(
       ...series.lineStyle,
       width: showLine ? config.lineWidth : 0,
       opacity: showLine ? config.lineOpacity / 100 : 0,
-      type: lineDashType(config.lineType),
+      type: lineDashType(config.lineType, config.lineWidth),
       cap: 'round',
       join: 'round',
       color: config.presentationMode
@@ -1232,7 +1222,7 @@ function stylePieSeries(
         ? {
             formatter: config.presentationMode
               ? showValuesOutside
-                ? pieOutsideValueFormatter(showNames)
+                ? pieOutsideValueFormatter(showNames, config)
                 : '{b}'
               : labelInSectorCenter
               ? valueFormatter(config)
@@ -1263,11 +1253,11 @@ function stylePieSeries(
   }
 }
 
-function piePercentageSeries(
+function pieValueSeries(
   series: EChartsOption,
   config: ResolvedChartStyle,
 ): EChartsOption {
-  const percentageFormatter = piePercentageFormatter()
+  const rawValueFormatter = valueFormatter(config)
   const valueLabelInside = config.barValuePosition === 'inside'
   const data = Array.isArray(series.data)
     ? series.data.map((item: unknown, dataIndex: number) => {
@@ -1290,7 +1280,7 @@ function piePercentageSeries(
             show: true,
             position: valueLabelInside ? 'inside' : 'outside',
             rotate: valueLabelInside ? 'tangential' : 0,
-            formatter: percentageFormatter,
+            formatter: rawValueFormatter,
             color: valueLabelInside ? '#FFFFFF' : itemColor,
             fontFamily: config.fontFamily,
             fontSize: config.valueLabelSize,
@@ -1310,7 +1300,7 @@ function piePercentageSeries(
 
   return {
     ...series,
-    id: `${String(series.id ?? series.name ?? 'pie')}-percentages`,
+    id: `${String(series.id ?? series.name ?? 'pie')}-values`,
     name: '',
     data,
     z: Number(series.z ?? 2) + 1,
@@ -1330,7 +1320,7 @@ function piePercentageSeries(
       show: true,
       position: valueLabelInside ? 'inside' : 'outside',
       rotate: valueLabelInside ? 'tangential' : 0,
-      formatter: percentageFormatter,
+      formatter: rawValueFormatter,
       color: valueLabelInside ? '#FFFFFF' : config.textColor,
       fontFamily: config.fontFamily,
       fontSize: config.valueLabelSize,
@@ -1692,7 +1682,7 @@ export function applyChartStyle(
         config.showPiePercentages &&
         config.barValuePosition === 'inside'
       ) {
-        series.push(piePercentageSeries(styledPie, config))
+        series.push(pieValueSeries(styledPie, config))
       }
       return
     }

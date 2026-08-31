@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import fokusLogo from '../assets/new-ui/app-shell/fokus-logo.svg'
 import leadsIcon from '../assets/new-ui/app-shell/leads.svg'
 import shareIcon from '../assets/new-ui/app-shell/share.svg'
@@ -14,7 +13,6 @@ defineEmits<{
 }>()
 
 const slideDots = Array.from({ length: 10 }, (_, index) => index)
-const isDataEditorOpen = ref(false)
 </script>
 
 <template>
@@ -71,46 +69,7 @@ const isDataEditorOpen = ref(false)
       <div class="new-ui-chart-card">
         <slot name="chart" />
       </div>
-      <div class="new-ui-chart-actions">
-        <button
-          class="new-ui-edit-data-button"
-          type="button"
-          aria-controls="new-ui-data-editor"
-          :aria-expanded="isDataEditorOpen"
-          @click="isDataEditorOpen = true"
-        >
-          Редактировать данные
-        </button>
-      </div>
     </section>
-
-    <div
-      v-if="isDataEditorOpen"
-      class="new-ui-data-editor-backdrop"
-      @click.self="isDataEditorOpen = false"
-      @keydown.esc="isDataEditorOpen = false"
-    >
-      <section
-        id="new-ui-data-editor"
-        class="new-ui-data-editor-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-ui-data-dialog-title"
-      >
-        <header>
-          <h2 id="new-ui-data-dialog-title">Редактировать данные</h2>
-          <button
-            type="button"
-            aria-label="Закрыть редактор данных"
-            title="Закрыть редактор данных"
-            @click="isDataEditorOpen = false"
-          >
-            ×
-          </button>
-        </header>
-        <slot name="data-editor" />
-      </section>
-    </div>
   </main>
 </template>
 
@@ -327,7 +286,11 @@ const isDataEditorOpen = ref(false)
   overflow-x: hidden;
   overflow-y: auto;
   background: #f6f6f6;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.new-ui-settings-drawer::-webkit-scrollbar {
+  display: none;
 }
 
 .new-ui-chart-preview {

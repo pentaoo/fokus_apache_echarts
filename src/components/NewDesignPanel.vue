@@ -331,11 +331,11 @@ function rangeStyle(value: number, minimum: number, maximum: number) {
     1,
     Math.max(0, span > 0 ? (value - minimum) / span : 0),
   )
-  const thumbSize = 24
+  const thumbWidth = 6
   const progressPercent = progress * 100
-  const thumbCorrection = thumbSize * progress
+  const thumbCorrection = thumbWidth * progress
   return {
-    '--range-progress': `calc(${thumbSize / 2}px + ${progressPercent}% - ${thumbCorrection}px)`,
+    '--range-progress': `calc(${thumbWidth / 2}px + ${progressPercent}% - ${thumbCorrection}px)`,
   }
 }
 
@@ -425,7 +425,8 @@ function updateLineWidth(value: number) {
 }
 
 function updateLinePointSize(value: number) {
-  props.settings.lineSymbolSize = Math.round((2 + value * 0.28) * 10) / 10
+  const size = 2 + (value / 100) * (MAX_LINE_WIDTH_PX - 2)
+  props.settings.lineSymbolSize = Math.round(size * 10) / 10
 }
 
 function setPieNames(show: boolean) {
@@ -487,6 +488,11 @@ function setPieNames(show: boolean) {
           {{ typeChoice.label }}
         </button>
       </div>
+    </section>
+
+    <section class="new-design-data-section">
+      <h3>Данные</h3>
+      <slot name="data-editor" />
     </section>
 
     <div class="new-design-settings">
@@ -712,13 +718,12 @@ function setPieNames(show: boolean) {
                 </div>
                 <div class="new-design-control-row">
                   <span>Начертание</span>
-                  <div class="new-design-text-tabs four">
+                  <div class="new-design-text-tabs three">
                     <button
                       v-for="choice in [
                         { value: 'solid', label: 'Обычная' },
                         { value: 'dashed', label: 'Штрихи' },
                         { value: 'dotted', label: 'Точки' },
-                        { value: 'dashDotted', label: 'Штрих-точка' },
                       ]"
                       :key="choice.value"
                       type="button"
@@ -755,13 +760,13 @@ function setPieNames(show: boolean) {
                     :value="settings.lineSymbolSize"
                     type="range"
                     min="2"
-                    max="30"
+                    :max="MAX_LINE_WIDTH_PX"
                     aria-label="Размер точек"
-                    :style="rangeStyle(settings.lineSymbolSize, 2, 30)"
+                    :style="rangeStyle(settings.lineSymbolSize, 2, MAX_LINE_WIDTH_PX)"
                     @input="settings.lineSymbolSize = Number(($event.target as HTMLInputElement).value)"
                   />
                   <FigmaPercentInput
-                    :model-value="Math.round(((settings.lineSymbolSize - 2) / 28) * 100)"
+                    :model-value="Math.round(((settings.lineSymbolSize - 2) / (MAX_LINE_WIDTH_PX - 2)) * 100)"
                     label="Размер точек"
                     @update:model-value="updateLinePointSize"
                   />
@@ -1232,8 +1237,8 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  height: 90px;
-  padding: 10px 20px;
+  height: 80px;
+  padding: 10px 20px 0;
 }
 
 .new-design-title-field label {
@@ -1330,7 +1335,7 @@ input:focus-visible {
   border: 0;
   border-radius: 26px;
   color: #000;
-  background: #ececec;
+  background: #fff;
   font-size: 16px;
   line-height: 24px;
   white-space: nowrap;
@@ -1389,6 +1394,21 @@ input:focus-visible {
   flex-direction: column;
   gap: 32px;
   padding: 32px 20px 0;
+}
+
+.new-design-data-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px 20px 0;
+}
+
+.new-design-data-section > h3 {
+  margin: 0;
+  padding: 0 16px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 24px;
 }
 
 .new-design-section {
@@ -1703,8 +1723,18 @@ input:focus-visible {
   border: 0;
   border-radius: 999px;
   background:
-    linear-gradient(var(--new-ui-accent), var(--new-ui-accent)) left center /
-      var(--range-progress) 24px no-repeat,
+    radial-gradient(
+      circle at calc(100% - 4px) center,
+      var(--new-ui-accent) 0 4px,
+      transparent 4px
+    ) left center / var(--range-progress) 8px no-repeat,
+    linear-gradient(var(--new-ui-accent), var(--new-ui-accent)) left 4px center /
+      max(0px, calc(var(--range-progress) - 8px)) 8px no-repeat,
+    radial-gradient(
+      circle at 4px center,
+      var(--new-ui-accent) 0 4px,
+      transparent 4px
+    ) left center / 8px 8px no-repeat,
     linear-gradient(#d8d8d8, #d8d8d8) center / 100% 2px no-repeat;
   cursor: pointer;
 }
@@ -1716,13 +1746,14 @@ input:focus-visible {
 }
 
 .new-design-range-row input[type="range"]::-webkit-slider-thumb {
-  width: 24px;
-  height: 24px;
+  box-sizing: content-box;
+  width: 6px;
+  height: 20px;
   margin: 0;
   appearance: none;
-  border: 3px solid var(--new-ui-accent);
-  border-radius: 50%;
-  background: #fff;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--new-ui-accent);
 }
 
 .new-design-range-row input[type="range"]::-moz-range-track {
@@ -1732,11 +1763,12 @@ input:focus-visible {
 }
 
 .new-design-range-row input[type="range"]::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border: 3px solid var(--new-ui-accent);
-  border-radius: 50%;
-  background: #fff;
+  box-sizing: content-box;
+  width: 6px;
+  height: 20px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--new-ui-accent);
 }
 
 .new-design-control-row {

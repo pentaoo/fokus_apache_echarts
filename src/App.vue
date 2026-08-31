@@ -20,6 +20,7 @@ import VChart from 'vue-echarts'
 import ChartDataEditor from './components/ChartDataEditor.vue'
 import HexColorInput from './components/HexColorInput.vue'
 import NewDesignPanel from './components/NewDesignPanel.vue'
+import NewChartDataEditor from './components/NewChartDataEditor.vue'
 import NewUiAppShell from './components/NewUiAppShell.vue'
 import {
   applyChartStyle,
@@ -657,7 +658,7 @@ function applyCssCode(value: string) {
     ['bar-border-width', 'barBorderWidth', 0, 20],
     ['line-width', 'lineWidth', MIN_LINE_WIDTH_PX, MAX_LINE_WIDTH_PX],
     ['line-opacity', 'lineOpacity', 0, 100],
-    ['line-symbol-size', 'lineSymbolSize', 2, 40],
+    ['line-symbol-size', 'lineSymbolSize', 2, MAX_LINE_WIDTH_PX],
     ['area-opacity', 'areaOpacity', 0, 100],
     ['pie-inner-radius', 'pieInnerRadius', 0, 80],
     ['pie-outer-radius', 'pieOuterRadius', 20, 100],
@@ -774,12 +775,7 @@ function applyCssCode(value: string) {
     ['bar-value-position', 'barValuePosition', ['inside', 'top']],
     ['bar-category-position', 'barCategoryPosition', ['axis', 'inside']],
     ['line-shape', 'lineShape', ['straight', 'smooth', 'step']],
-    ['line-type', 'lineType', [
-      'solid',
-      'dashed',
-      'dotted',
-      'dashDotted',
-    ]],
+    ['line-type', 'lineType', ['solid', 'dashed', 'dotted']],
     ['line-symbol', 'lineSymbol', [
       'circle',
       'rect',
@@ -909,6 +905,226 @@ function approximateTextWidth(text: string, fontSize: number) {
   )
 }
 
+interface WrappedTextLayout {
+  text: string
+  lines: string[]
+}
+
+function fitTextWithEllipsis(
+  text: string,
+  maximumWidth: number,
+  fontSize: number,
+) {
+  const ellipsis = '…'
+  const characters = Array.from(text.trimEnd())
+  while (
+    characters.length > 0 &&
+    approximateTextWidth(`${characters.join('')}${ellipsis}`, fontSize) >
+      maximumWidth
+  ) {
+    characters.pop()
+  }
+  return `${characters.join('').trimEnd()}${ellipsis}`
+}
+
+function wrapTextWithEllipsis(
+  source: string,
+  maximumWidth: number,
+  fontSize: number,
+  maximumLines = 3,
+): WrappedTextLayout {
+  const normalized = source.replace(/\s+/g, ' ').trim()
+  if (!normalized || maximumWidth <= 0 || maximumLines <= 0) {
+    return { text: '', lines: [] }
+  }
+
+  const lines: string[] = []
+  let remaining = normalized
+
+  while (remaining && lines.length < maximumLines) {
+    if (approximateTextWidth(remaining, fontSize) <= maximumWidth) {
+      lines.push(remaining)
+      remaining = ''
+      break
+    }
+
+    const characters = Array.from(remaining)
+    let fittingLength = 0
+    while (
+      fittingLength < characters.length &&
+      approximateTextWidth(
+        characters.slice(0, fittingLength + 1).join(''),
+        fontSize,
+      ) <= maximumWidth
+    ) {
+      fittingLength += 1
+    }
+
+    fittingLength = Math.max(1, fittingLength)
+    const fittingText = characters.slice(0, fittingLength).join('')
+    const lastSpace = fittingText.lastIndexOf(' ')
+    const breakLength = lastSpace > 0 ? lastSpace : fittingLength
+    const line = characters.slice(0, breakLength).join('').trim()
+    const next = characters
+      .slice(lastSpace > 0 ? breakLength + 1 : breakLength)
+      .join('')
+      .trimStart()
+
+    if (lines.length === maximumLines - 1) {
+      lines.push(fitTextWithEllipsis(line || next, maximumWidth, fontSize))
+      remaining = ''
+      break
+    }
+
+    lines.push(line || characters[0])
+    remaining = next
+  }
+
+  return { text: lines.join('\n'), lines }
+}
+
+function addEllipsisToLayout(
+  layout: WrappedTextLayout,
+  maximumWidth: number,
+  fontSize: number,
+): WrappedTextLayout {
+  if (layout.lines.length === 0) return layout
+  if (layout.lines[layout.lines.length - 1].endsWith('…')) return layout
+  const lines = [...layout.lines]
+  lines[lines.length - 1] = fitTextWithEllipsis(
+    lines[lines.length - 1],
+    maximumWidth,
+    fontSize,
+  )
+  return { text: lines.join('\n'), lines }
+}
+
+interface LegendTextLayout {
+  visibleNames: string[]
+  labels: Record<string, string>
+  lineCount: number
+  widestItem: number
+}
+
+function layoutLegendText(
+  names: string[],
+  maximumWidth: number,
+  fontSize: number,
+  markerSize: number,
+  itemGap: number,
+  vertical: boolean,
+  maximumLines = 3,
+): LegendTextLayout {
+  const measurementFontSize = fontSize * 1.12
+  const availableLabelWidth = maximumWidth - markerSize - itemGap
+  const labelMaximumWidth = Math.max(
+    measurementFontSize * 3,
+    vertical
+      ? availableLabelWidth
+      : Math.min(availableLabelWidth, maximumWidth * 0.58),
+  )
+  const rows: Array<{ width: number; lines: number }> = []
+  const visibleNames: string[] = []
+  const labels: Record<string, string> = {}
+  let widestItem = 0
+  let truncated = false
+
+  for (const [nameIndex, name] of names.entries()) {
+    let layout = wrapTextWithEllipsis(
+      name,
+      labelMaximumWidth,
+      measurementFontSize,
+      maximumLines,
+    )
+    let textWidth = Math.max(
+      0,
+      ...layout.lines.map((line) =>
+        approximateTextWidth(line, measurementFontSize),
+      ),
+    )
+    let itemWidth = Math.min(
+      maximumWidth,
+      markerSize + Math.round(8) + textWidth,
+    )
+    const previousLineCount = rows.reduce((sum, row) => sum + row.lines, 0)
+    const currentRow = rows[rows.length - 1]
+    const startsNewRow =
+      vertical || !currentRow || currentRow.width + itemGap + itemWidth > maximumWidth
+    let nextRowLines = Math.max(1, layout.lines.length)
+    let nextTotalLines = startsNewRow
+      ? previousLineCount + nextRowLines
+      : previousLineCount - currentRow.lines + Math.max(currentRow.lines, nextRowLines)
+
+    if (nextTotalLines > maximumLines) {
+      const allowedLines = startsNewRow
+        ? maximumLines - previousLineCount
+        : currentRow.lines + maximumLines - previousLineCount
+      if (allowedLines <= 0) {
+        truncated = true
+        break
+      }
+      layout = wrapTextWithEllipsis(
+        name,
+        labelMaximumWidth,
+        measurementFontSize,
+        allowedLines,
+      )
+      textWidth = Math.max(
+        0,
+        ...layout.lines.map((line) =>
+          approximateTextWidth(line, measurementFontSize),
+        ),
+      )
+      itemWidth = Math.min(
+        maximumWidth,
+        markerSize + Math.round(8) + textWidth,
+      )
+      nextRowLines = Math.max(1, layout.lines.length)
+      nextTotalLines = startsNewRow
+        ? previousLineCount + nextRowLines
+        : previousLineCount - currentRow.lines +
+          Math.max(currentRow.lines, nextRowLines)
+      truncated = nameIndex < names.length - 1 || layout.text.endsWith('…')
+    }
+
+    if (startsNewRow) {
+      rows.push({ width: itemWidth, lines: nextRowLines })
+    } else {
+      currentRow.width += itemGap + itemWidth
+      currentRow.lines = Math.max(currentRow.lines, nextRowLines)
+    }
+    visibleNames.push(name)
+    labels[name] = layout.text
+    widestItem = Math.max(widestItem, itemWidth)
+    if (truncated || nextTotalLines >= maximumLines) {
+      truncated = nameIndex < names.length - 1 || layout.text.endsWith('…')
+      break
+    }
+  }
+
+  if (truncated && visibleNames.length > 0) {
+    const lastName = visibleNames[visibleNames.length - 1]
+    const lastLayout = wrapTextWithEllipsis(
+      labels[lastName],
+      labelMaximumWidth,
+      measurementFontSize,
+      maximumLines,
+    )
+    labels[lastName] = addEllipsisToLayout(
+      lastLayout,
+      labelMaximumWidth,
+      measurementFontSize,
+    ).text
+  }
+
+  return {
+    visibleNames,
+    labels,
+    lineCount: rows.reduce((sum, row) => sum + row.lines, 0),
+    widestItem,
+  }
+}
+
 function topLegendFitsTitle(legendItems: string[], showTitle: boolean) {
   const scale = newUiChartScale.value
   const stageWidth = chartStageSize.value.width
@@ -947,6 +1163,14 @@ function randomizeChartStyle() {
   const presentation = styleSettings.value.presentationMode
   const currentType = chartType.value
   const currentKind = activeNewUiChartKind()
+  const randomValueLabelSize = randomInteger(14, 32)
+  const nextValueLabelSize =
+    currentType === 'line' &&
+    randomValueLabelSize === styleSettings.value.valueLabelSize
+      ? randomValueLabelSize === 32
+        ? 31
+        : randomValueLabelSize + 1
+      : randomValueLabelSize
   const pieOuterRadius = randomInteger(64, 92)
   const pieInnerRadius =
     currentType === 'doughnut'
@@ -1006,10 +1230,7 @@ function randomizeChartStyle() {
       : hslToHex(baseHue, 18, randomInteger(68, 82)),
     palette,
     paletteOpacities: palette.map(() => randomInteger(78, 100)),
-    fontWeight: randomChoice([500, 600, 700, 800, 900]),
-    xAxisLabelSize: randomInteger(11, 18),
-    yAxisLabelSize: randomInteger(10, 16),
-    valueLabelSize: randomInteger(14, 32),
+    valueLabelSize: nextValueLabelSize,
     pieLabelSize: randomInteger(12, 24),
     showXAxisLabels: presentation && currentType === 'line'
       ? true
@@ -1017,9 +1238,10 @@ function randomizeChartStyle() {
     showYAxisLabels: presentation && currentType === 'line'
       ? true
       : randomBoolean(0.72),
-    showValueLabels: presentation && currentType === 'line'
-      ? false
-      : randomBoolean(0.48),
+    showValueLabels:
+      currentType === 'line'
+        ? !styleSettings.value.showValueLabels
+        : randomBoolean(0.48),
     labelAlignment,
     titleAlignment,
     showTitle,
@@ -1055,7 +1277,6 @@ function randomizeChartStyle() {
       'solid',
       'dashed',
       'dotted',
-      'dashDotted',
     ]),
     smoothLines: lineShape === 'smooth',
     showLineSymbols,
@@ -1113,7 +1334,7 @@ function updateNumberById(seriesId: number, rowIndex: number, rawValue: string) 
 
 function addRow() {
   categories.value.push(`Категория ${categories.value.length + 1}`)
-  dataSeries.value.forEach((item) => item.values.push(null))
+  dataSeries.value.forEach((item) => item.values.push(0))
 }
 
 function removeRow(rowIndex: number) {
@@ -1126,12 +1347,33 @@ function addSeries() {
   dataSeries.value.push({
     id,
     name: `Серия ${dataSeries.value.length + 1}`,
-    values: categories.value.map(() => null),
+    values: categories.value.map(() => 0),
   })
 }
 
 function removeSeries(seriesId: number) {
   dataSeries.value = dataSeries.value.filter((item) => item.id !== seriesId)
+}
+
+function transposeData() {
+  const previousCategories = [...categories.value]
+  const previousSeries = dataSeries.value.map((item) => ({
+    ...item,
+    values: [...item.values],
+  }))
+  categories.value = previousSeries.map((item) => item.name)
+  dataSeries.value = previousCategories.map((name, categoryIndex) => ({
+    id: nextSeriesId.value++,
+    name,
+    values: previousSeries.map((item) => item.values[categoryIndex] ?? 0),
+  }))
+}
+
+function clearDataValues() {
+  dataSeries.value = dataSeries.value.map((item) => ({
+    ...item,
+    values: categories.value.map(() => 0),
+  }))
 }
 
 function resetData() {
@@ -1340,11 +1582,29 @@ const newUiChartScale = computed(() => {
   return Math.min(1.35, Math.max(0.4, scale || 1))
 })
 
+const newUiTitleLayout = computed(() => {
+  const scale = newUiChartScale.value
+  const fontSize = Math.round(24 * scale)
+  const horizontalInset = Math.max(16, Math.round(16 * scale))
+  return wrapTextWithEllipsis(
+    chartTitle.value,
+    Math.max(1, chartStageSize.value.width - horizontalInset * 2),
+    fontSize * 1.12,
+    3,
+  )
+})
+
+const newUiTitleReserve = computed(() => {
+  if (!styleSettings.value.showTitle || newUiTitleLayout.value.lines.length === 0) {
+    return 0
+  }
+  const scale = newUiChartScale.value
+  const lineHeight = Math.round(29 * scale)
+  return newUiTitleLayout.value.lines.length * lineHeight + Math.round(16 * scale)
+})
+
 const newUiPieTopReserve = computed(() => {
-  const titleReserve =
-    styleSettings.value.showTitle && chartTitle.value.trim()
-      ? Math.round(58 * newUiChartScale.value)
-      : 0
+  const titleReserve = newUiTitleReserve.value
   const kind = activeNewUiChartKind()
   const legendReserve =
     (kind === 'pie' || kind === 'doughnut') &&
@@ -1554,38 +1814,93 @@ const newUiOption = computed<ChartOption>(() => {
   const settingsSnapshot = JSON.parse(styleRevision.value) as StyleSettings
   const scale = newUiChartScale.value
   const kind = activeNewUiChartKind()
-  const rowsLegendItems = dataSeries.value.map((series) => series.name)
-  const rowsTopLegendIsSafe =
-    kind === 'rows' &&
-    settingsSnapshot.showLegend &&
-    settingsSnapshot.legendPosition === 'top' &&
-    topLegendFitsTitle(rowsLegendItems, settingsSnapshot.showTitle)
-  const rowsLegendPosition: 'top' | 'bottom' = rowsTopLegendIsSafe
-    ? 'top'
-    : 'bottom'
+  const rowsLegendPosition: 'top' | 'bottom' =
+    settingsSnapshot.legendPosition === 'top' ? 'top' : 'bottom'
+  const resolvedLegendPosition =
+    kind === 'rows' ? rowsLegendPosition : settingsSnapshot.legendPosition
+  const legendNames =
+    kind === 'pie' || kind === 'doughnut'
+      ? [...categories.value]
+      : dataSeries.value.map((series) => series.name)
+  const titleLayout = settingsSnapshot.showTitle
+    ? newUiTitleLayout.value
+    : { text: '', lines: [] }
+  const titleLineHeight = Math.round(29 * scale)
+  const titleReserve = settingsSnapshot.showTitle
+    ? newUiTitleReserve.value
+    : 0
+  const legendFontSize = Math.max(
+    11,
+    Math.round(settingsSnapshot.legendFontSize * scale),
+  )
+  const legendLineHeight = Math.round(legendFontSize * 1.3)
+  const legendMarkerSize = Math.max(
+    8,
+    Math.round(settingsSnapshot.legendItemSize * scale),
+  )
+  const legendItemGap = Math.max(
+    8,
+    Math.round(settingsSnapshot.legendGap * scale),
+  )
+  const legendIsVertical =
+    resolvedLegendPosition === 'left' || resolvedLegendPosition === 'right'
+  const legendMaximumWidth = legendIsVertical
+    ? Math.max(
+        96,
+        Math.min(
+          chartStageSize.value.width * 0.3,
+          Math.round(190 * scale),
+        ),
+      )
+    : Math.max(1, chartStageSize.value.width - Math.round(32 * scale))
+  const legendTextLayout = settingsSnapshot.showLegend
+    ? layoutLegendText(
+        legendNames,
+        legendMaximumWidth,
+        legendFontSize,
+        legendMarkerSize,
+        legendItemGap,
+        legendIsVertical,
+        3,
+      )
+    : {
+        visibleNames: [],
+        labels: {},
+        lineCount: 0,
+        widestItem: 0,
+      }
+  const legendIsVisible =
+    settingsSnapshot.showLegend && legendTextLayout.visibleNames.length > 0
+  const legendContentHeight = legendIsVisible
+    ? Math.max(legendLineHeight, legendTextLayout.lineCount * legendLineHeight)
+    : 0
+  const legendOuterGap = Math.round(12 * scale)
+  const legendTop = titleReserve > 0 ? titleReserve : legendOuterGap
+  const legendVerticalReserve = legendIsVisible
+    ? legendContentHeight + legendOuterGap * 2
+    : 0
+  const legendSideReserve = legendIsVisible && legendIsVertical
+    ? Math.min(
+        chartStageSize.value.width * 0.34,
+        legendTextLayout.widestItem + legendOuterGap * 2,
+      )
+    : 0
+  const topContentReserve =
+    titleReserve +
+    (legendIsVisible && resolvedLegendPosition === 'top'
+      ? legendVerticalReserve
+      : 0)
+  const bottomContentReserve =
+    legendIsVisible && resolvedLegendPosition === 'bottom'
+      ? legendVerticalReserve
+      : 0
   const categoryCount = Math.max(1, categories.value.length)
-  const titleReserve =
-    settingsSnapshot.showTitle && chartTitle.value.trim()
-      ? Math.round(52 * scale)
-      : 0
-  const legendTopReserve =
-    kind === 'rows' &&
-    settingsSnapshot.showLegend &&
-    rowsLegendPosition === 'top'
-      ? Math.round(44 * scale)
-      : 0
-  const legendBottomReserve =
-    kind === 'rows' &&
-    settingsSnapshot.showLegend &&
-    rowsLegendPosition === 'bottom'
-      ? Math.round(44 * scale)
-      : 0
   const categoryAxisLength = kind === 'rows'
     ? Math.max(
         1,
         chartStageSize.value.height -
-          Math.max(titleReserve, legendTopReserve) -
-          legendBottomReserve,
+          topContentReserve -
+          bottomContentReserve,
       )
     : Math.max(1, chartStageSize.value.width)
   const categoryBandSize = categoryAxisLength / categoryCount
@@ -1633,6 +1948,7 @@ const newUiOption = computed<ChartOption>(() => {
     (Math.min(120, Math.max(0, settingsSnapshot.barRadius)) / 120)
   const styled = applyChartStyle(rawOption.value, {
     ...settingsSnapshot,
+    legendPosition: resolvedLegendPosition,
     barCategoryPosition:
       kind === 'rows' ? 'inside' : settingsSnapshot.barCategoryPosition,
     barRadius: proportionalBarRadius,
@@ -1707,27 +2023,23 @@ const newUiOption = computed<ChartOption>(() => {
       } = styled.grid ?? {}
       styled.grid = {
         ...responsiveGrid,
-        left: 0,
-        right: 0,
-        top: Math.max(titleReserve, legendTopReserve),
-        bottom: legendBottomReserve,
-      }
-
-      if (settingsSnapshot.showLegend && styled.legend && !Array.isArray(styled.legend)) {
-        styled.legend = {
-          ...styled.legend,
-          left: 'center',
-          right: undefined,
-          top: rowsLegendPosition === 'top' ? Math.round(18 * scale) : undefined,
-          bottom:
-            rowsLegendPosition === 'bottom' ? Math.round(18 * scale) : undefined,
-          orient: 'horizontal',
-        }
+        left: resolvedLegendPosition === 'left' ? legendSideReserve : 0,
+        right: resolvedLegendPosition === 'right' ? legendSideReserve : 0,
+        top: topContentReserve,
+        bottom: bottomContentReserve,
       }
     } else {
       styled.grid = {
         ...(styled.grid ?? {}),
+        top: topContentReserve,
+        bottom: bottomContentReserve,
+        ...(resolvedLegendPosition === 'left'
+          ? { left: legendSideReserve }
+          : {}),
         right: 0,
+        ...(resolvedLegendPosition === 'right'
+          ? { right: legendSideReserve }
+          : {}),
       }
     }
   }
@@ -1746,13 +2058,79 @@ const newUiOption = computed<ChartOption>(() => {
       }
     })
     styled.xAxis = Array.isArray(source) ? axes : axes[0]
+
+    styled.grid = {
+      ...(styled.grid ?? {}),
+      top: topContentReserve,
+      bottom: bottomContentReserve,
+      ...(resolvedLegendPosition === 'left'
+        ? { left: legendSideReserve }
+        : {}),
+      ...(resolvedLegendPosition === 'right'
+        ? { right: legendSideReserve }
+        : {}),
+    }
+  }
+
+  if (styled.legend && !Array.isArray(styled.legend)) {
+    const legendFormatter = (name: string) =>
+      legendTextLayout.labels[name] ?? name
+    styled.legend = {
+      ...styled.legend,
+      show: legendIsVisible,
+      type: 'plain',
+      data: legendTextLayout.visibleNames,
+      formatter: legendFormatter,
+      itemWidth: legendMarkerSize,
+      itemHeight: legendMarkerSize,
+      itemGap: legendItemGap,
+      width: legendMaximumWidth,
+      height: legendContentHeight,
+      orient: legendIsVertical ? 'vertical' : 'horizontal',
+      left:
+        resolvedLegendPosition === 'left'
+          ? legendOuterGap
+          : resolvedLegendPosition === 'right'
+            ? undefined
+            : 'center',
+      right:
+        resolvedLegendPosition === 'right' ? legendOuterGap : undefined,
+      top:
+        resolvedLegendPosition === 'top'
+          ? legendTop
+          : legendIsVertical
+            ? titleReserve + legendOuterGap
+            : undefined,
+      bottom:
+        resolvedLegendPosition === 'bottom' ? legendOuterGap : undefined,
+      textStyle: {
+        ...(styled.legend.textStyle ?? {}),
+        fontSize: legendFontSize,
+        lineHeight: legendLineHeight,
+        overflow: 'breakAll',
+      },
+    }
   }
 
   if (kind === 'pie' || kind === 'doughnut') {
-    const titleReserve = newUiPieTopReserve.value
-    const availableHeight = newUiPieAvailableHeight.value
+    const leftReserve =
+      resolvedLegendPosition === 'left' ? legendSideReserve : 0
+    const rightReserve =
+      resolvedLegendPosition === 'right' ? legendSideReserve : 0
+    const availableWidth = Math.max(
+      1,
+      chartStageSize.value.width - leftReserve - rightReserve,
+    )
+    const availableHeight = Math.max(
+      1,
+      chartStageSize.value.height - topContentReserve - bottomContentReserve,
+    )
+    const maximumRadius = Math.max(
+      1,
+      Math.min(availableWidth, availableHeight) / 2,
+    )
     const outerRadius =
-      newUiPieMaximumRadius.value *
+      maximumRadius *
       (Math.min(100, Math.max(30, settingsSnapshot.pieOuterRadius)) / 100)
     const requestedThickness = getPieThicknessPercent(
       settingsSnapshot.pieInnerRadius,
@@ -1775,19 +2153,19 @@ const newUiOption = computed<ChartOption>(() => {
     )
     const radialThickness = outerRadius * (1 - innerRatio)
     const relativeBorderRadius = radialThickness * 0.5 * roundingRatio
-    const centerX = chartStageSize.value.width / 2
-    const centerY = titleReserve + availableHeight / 2
+    const centerX = leftReserve + availableWidth / 2
+    const centerY = topContentReserve + availableHeight / 2
     const sourceSeries = Array.isArray(styled.series)
       ? styled.series
       : [styled.series]
     const circularSeries = sourceSeries.map((series) => {
-      const percentageLayer = String(series?.id ?? '').endsWith('-percentages')
+      const valueLayer = String(series?.id ?? '').endsWith('-values')
 
       return {
         ...(series ?? {}),
         center: [centerX, centerY],
         radius: [outerRadius * innerRatio, outerRadius],
-        ...(percentageLayer
+        ...(valueLayer
           ? { labelLayout: centerPieInsideLabel(centerX, centerY) }
           : {}),
         itemStyle: {
@@ -1804,13 +2182,14 @@ const newUiOption = computed<ChartOption>(() => {
   if (styled.title && !Array.isArray(styled.title)) {
     styled.title = {
       ...styled.title,
+      text: titleLayout.text,
       top: 0,
       left: settingsSnapshot.titleAlignment,
       textStyle: {
         ...(styled.title.textStyle ?? {}),
         fontSize: Math.round(24 * scale),
         fontWeight: 900,
-        lineHeight: Math.round(29 * scale),
+        lineHeight: titleLineHeight,
       },
     }
   }
@@ -1883,7 +2262,23 @@ async function copyOption() {
         @randomize="randomizeChartStyle"
         @clear="resetNewDesign"
         @close="uiDesignMode = 'classic'"
-      />
+      >
+        <template #data-editor>
+          <NewChartDataEditor
+            :categories="categories"
+            :series="dataSeries"
+            @update-category="updateCategory"
+            @update-series-name="updateSeriesName"
+            @update-number="updateNumberById"
+            @remove-series="removeSeries"
+            @remove-row="removeRow"
+            @add-row="addRow"
+            @add-series="addSeries"
+            @transpose="transposeData"
+            @clear="clearDataValues"
+          />
+        </template>
+      </NewDesignPanel>
     </template>
 
     <template #chart>
@@ -1904,20 +2299,6 @@ async function copyOption() {
       </div>
     </template>
 
-    <template #data-editor>
-      <ChartDataEditor
-        :categories="categories"
-        :series="dataSeries"
-        heading-id="new-ui-data-editor-title"
-        @update-category="updateCategory"
-        @update-series-name="updateSeriesName"
-        @update-number="updateNumberById"
-        @remove-series="removeSeries"
-        @remove-row="removeRow"
-        @add-row="addRow"
-        @add-series="addSeries"
-      />
-    </template>
   </NewUiAppShell>
 
   <main v-else class="app-shell">
@@ -2258,7 +2639,7 @@ async function copyOption() {
                   v-model.number="styleSettings.lineSymbolSize"
                   type="range"
                   min="2"
-                  max="40"
+                  :max="MAX_LINE_WIDTH_PX"
                 />
                 <output>{{ styleSettings.lineSymbolSize }} px</output>
               </label>
