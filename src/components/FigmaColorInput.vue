@@ -12,12 +12,15 @@ interface EyeDropperInstance {
 
 type EyeDropperConstructor = new () => EyeDropperInstance
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: string
   opacity: number
   label: string
   open: boolean
-}>()
+  showOpacity?: boolean
+}>(), {
+  showOpacity: true,
+})
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -371,7 +374,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="root" class="figma-color-input" :class="{ open }">
+  <div
+    ref="root"
+    class="figma-color-input"
+    :class="{ open, 'without-opacity': !showOpacity }"
+  >
     <div class="figma-color-main">
       <button
         class="figma-color-swatch"
@@ -391,6 +398,7 @@ onBeforeUnmount(() => {
       />
     </div>
     <div
+      v-if="showOpacity"
       class="figma-color-opacity"
       title="Потяните, чтобы изменить непрозрачность"
       @pointerdown="startOpacityScrub"
@@ -462,6 +470,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
       <label
+        v-if="showOpacity"
         class="figma-alpha-track"
         :style="{
           '--thumb-position': `${alphaTrackPosition}px`,
@@ -500,6 +509,19 @@ onBeforeUnmount(() => {
   border-color: #2f2f2f;
   color: #fff;
   background: #000;
+}
+
+.figma-color-input.without-opacity {
+  grid-template-columns: 1fr;
+}
+
+.figma-color-input.without-opacity .figma-color-main {
+  width: 100%;
+  grid-template-columns: 40px 1fr;
+}
+
+.figma-color-input.without-opacity .figma-color-popover {
+  height: 204px;
 }
 
 .figma-color-main {

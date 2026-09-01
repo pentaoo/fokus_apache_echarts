@@ -18,6 +18,7 @@ export type LineStyleType = 'solid' | 'dashed' | 'dotted'
 export type PieRoseType = 'none' | 'radius' | 'area'
 export type PieLabelPosition = 'outside' | 'inside' | 'center'
 export type LegendPosition = 'top' | 'bottom' | 'left' | 'right'
+export type LegendOrientation = 'horizontal' | 'vertical'
 export type ValueFormat = 'number' | 'percent' | 'compact'
 export type SymbolShape =
   | 'circle'
@@ -36,6 +37,14 @@ export type AnimationEasing =
   | 'cubicInOut'
   | 'quarticOut'
   | 'elasticOut'
+
+export function getLegendOrientation(
+  position: LegendPosition,
+): LegendOrientation {
+  return position === 'left' || position === 'right'
+    ? 'vertical'
+    : 'horizontal'
+}
 
 export interface ChartStyleConfig {
   backgroundColor?: string
@@ -671,7 +680,9 @@ function styleAxis(
         ? 'left'
         : isCategory
           ? barCategoryAxis
-            ? 'center'
+            ? verticalBarCategoryAxis
+              ? 'center'
+              : 'right'
             : dimension === 'x'
             ? horizontalCategoryAlign
             : config.labelAlignment
@@ -952,12 +963,17 @@ function styleBarSeries(
   const sourceMinimumBarWidth =
     typeof series.barMinWidth === 'number' ? series.barMinWidth : 0
   const insidePosition = horizontal ? 'insideRight' : 'insideTop'
+  const fillsCategoryBand = config.barGapPercent <= 0
 
   return {
     ...base,
     data: styledData,
-    ...(config.barWidth > 0 ? { barWidth: config.barWidth } : {}),
-    barMaxWidth: config.barMaxWidth,
+    ...(!fillsCategoryBand && config.barWidth > 0
+      ? { barWidth: config.barWidth }
+      : {}),
+    ...(!fillsCategoryBand && config.barMaxWidth > 0
+      ? { barMaxWidth: config.barMaxWidth }
+      : {}),
     ...(!horizontal && minimumBarWidth > 0
       ? { barMinWidth: Math.max(sourceMinimumBarWidth, minimumBarWidth) }
       : {}),
@@ -1465,11 +1481,13 @@ function legendLayout(
   presentationLine = false,
   hasTitle = false,
 ) {
+  const orient = getLegendOrientation(config.legendPosition)
   const common = {
     type: 'scroll',
     itemWidth: config.legendItemSize,
     itemHeight: config.legendItemSize,
     itemGap: config.legendGap,
+    orient,
   }
 
   if (config.legendPosition === 'top') {
@@ -1478,16 +1496,15 @@ function legendLayout(
       top: presentationLine && hasTitle ? 48 : 18,
       left: 'center',
       right: presentationLine ? 0 : undefined,
-      orient: 'horizontal',
     }
   }
   if (config.legendPosition === 'bottom') {
-    return { ...common, bottom: 18, left: 'center', orient: 'horizontal' }
+    return { ...common, bottom: 18, left: 'center' }
   }
   if (config.legendPosition === 'left') {
-    return { ...common, left: 18, top: 'middle', orient: 'vertical' }
+    return { ...common, left: 18, top: 'middle' }
   }
-  return { ...common, right: 18, top: 'middle', orient: 'vertical' }
+  return { ...common, right: 18, top: 'middle' }
 }
 
 function gridLayout(

@@ -2,8 +2,10 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import FigmaColorInput from './FigmaColorInput.vue'
 import FigmaPercentInput from './FigmaPercentInput.vue'
+import { generateMonochromePalette } from '../colorPalette'
 import type {
   BarArrangement,
+  BarCategoryPosition,
   BarOrder,
   BarValuePosition,
   LabelAlignment,
@@ -49,6 +51,7 @@ const props = defineProps<{
   chartType: ChartType
   chartTitle: string
   selectedPaletteId: PalettePresetId | 'chalk'
+  monoBaseColor: string
   series: PanelSeries[]
   dataRowCount: number
   pieWarnings: string[]
@@ -62,6 +65,7 @@ const emit = defineEmits<{
   'select-columns-bar': []
   'select-horizontal-bar': []
   'apply-palette': [id: PaletteChoice['id'], colors: string[]]
+  'update:mono-base-color': [value: string]
   'mark-palette-custom': []
   'add-palette-color': []
   'randomize': []
@@ -182,6 +186,10 @@ const canAddPaletteColor = computed(
   () => props.settings.palette.length < requiredColorCount.value,
 )
 
+const monochromePreview = computed(() =>
+  generateMonochromePalette(props.monoBaseColor, 5),
+)
+
 const presetScroll = ref<HTMLElement | null>(null)
 const presetDragging = ref(false)
 const openPaletteIndex = ref<number | null>(null)
@@ -297,6 +305,10 @@ function selectType(id: (typeof typeChoices)[number]['id']) {
 
 function setPalette(choice: PaletteChoice) {
   emit('apply-palette', choice.id, choice.colors)
+}
+
+function palettePreview(choice: PaletteChoice) {
+  return choice.id === 'mono' ? monochromePreview.value : choice.colors
 }
 
 function updatePaletteColor(index: number, value: string) {
@@ -520,7 +532,7 @@ function setPieNames(show: boolean) {
             <span>{{ choice.name }}</span>
             <span class="new-design-dots" aria-hidden="true">
               <i
-                v-for="color in choice.colors"
+                v-for="color in palettePreview(choice)"
                 :key="color"
                 :style="{ backgroundColor: color }"
               />
@@ -530,8 +542,27 @@ function setPieNames(show: boolean) {
 
         <div class="new-design-palette-stack">
           <div
+            v-if="selectedPaletteId === 'mono'"
+            class="new-design-palette-card new-design-mono-base-card"
+          >
+            <span>Основной цвет</span>
+            <FigmaColorInput
+              :model-value="monoBaseColor"
+              :opacity="100"
+              label="Основной цвет одноцветной палитры"
+              :open="openPaletteIndex === -1"
+              :show-opacity="false"
+              @open="openPaletteIndex = -1"
+              @close="openPaletteIndex = null"
+              @update:model-value="emit('update:mono-base-color', $event)"
+            />
+          </div>
+          <div
             class="new-design-palette-card"
-            :class="{ 'has-gradient-toggle': chartType === 'bar' }"
+            :class="{
+              'has-gradient-toggle': chartType === 'bar',
+              'has-mono-base': selectedPaletteId === 'mono',
+            }"
           >
             <span>Цвета</span>
             <div class="new-design-palette-list">
@@ -1150,6 +1181,29 @@ function setPieNames(show: boolean) {
             <input v-model="settings.showYAxisLabels" type="checkbox" />
             <i aria-hidden="true" />
           </label>
+          <div
+            v-if="activeType === 'rows' && settings.showYAxisLabels"
+            class="new-design-control-row"
+          >
+            <span>Положение подписей</span>
+            <div
+              class="new-design-text-tabs"
+              aria-label="Положение вертикальных подписей"
+            >
+              <button
+                type="button"
+                :class="{ active: settings.barCategoryPosition === 'inside' }"
+                :aria-pressed="settings.barCategoryPosition === 'inside'"
+                @click="settings.barCategoryPosition = 'inside' as BarCategoryPosition"
+              >В строке</button>
+              <button
+                type="button"
+                :class="{ active: settings.barCategoryPosition === 'axis' }"
+                :aria-pressed="settings.barCategoryPosition === 'axis'"
+                @click="settings.barCategoryPosition = 'axis' as BarCategoryPosition"
+              >Слева за осью</button>
+            </div>
+          </div>
           <label class="new-design-switch-row last">
             <span>Легенда</span>
             <input v-model="settings.showLegend" type="checkbox" />
@@ -1541,6 +1595,24 @@ input:focus-visible {
 
 .new-design-palette-card.has-gradient-toggle {
   border-radius: 26px 26px 4px 4px;
+}
+
+.new-design-mono-base-card {
+  min-height: 72px;
+  align-items: center;
+  border-radius: 26px 26px 4px 4px;
+}
+
+.new-design-mono-base-card > span {
+  padding-top: 0;
+}
+
+.new-design-palette-card.has-mono-base {
+  border-radius: 4px 4px 26px 26px;
+}
+
+.new-design-palette-card.has-mono-base.has-gradient-toggle {
+  border-radius: 4px;
 }
 
 .new-design-palette-card > span {

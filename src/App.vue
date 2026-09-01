@@ -22,8 +22,10 @@ import HexColorInput from './components/HexColorInput.vue'
 import NewDesignPanel from './components/NewDesignPanel.vue'
 import NewChartDataEditor from './components/NewChartDataEditor.vue'
 import NewUiAppShell from './components/NewUiAppShell.vue'
+import { generateMonochromePalette } from './colorPalette'
 import {
   applyChartStyle,
+  getLegendOrientation,
   getMinimumBarWidthForValues,
   getMinimumPieThicknessPercent,
   getPieInnerRadius,
@@ -134,7 +136,9 @@ const backgroundPresets: BackgroundPreset[] = [
 
 const categories = ref([...initialCategories])
 const dataSeries = ref<DataSeries[]>(cloneInitialSeries())
-const monoPalette = PALETTE_PRESETS.find((preset) => preset.id === 'mono')!.colors.slice(0, 5)
+const defaultMonoBaseColor = PALETTE_PRESETS.find(
+  (preset) => preset.id === 'mono',
+)!.colors[4]!
 
 const chartType = ref<ChartType>('bar')
 const renderer = ref<Renderer>('canvas')
@@ -149,7 +153,12 @@ const nextSeriesId = ref(3)
 const copied = ref(false)
 const isEditingCss = ref(false)
 const cssCode = ref('')
+const cssPaletteSnapshot = ref<{
+  colors: string[]
+  opacities: number[]
+} | null>(null)
 const selectedPaletteId = ref<PalettePresetId | 'chalk'>('chalk')
+const monoBaseColor = ref(defaultMonoBaseColor)
 const initialStyle = createNewUiStylePreset('columns')
 const styleSettings = ref<StyleSettings>(initialStyle)
 const styleSnapshots = new Map<ChartType, StyleSettings>()
@@ -184,6 +193,42 @@ function cloneStyleSettings(settings: StyleSettings): StyleSettings {
     palette: [...settings.palette],
     paletteOpacities: [...settings.paletteOpacities],
   }
+}
+
+const requiredPaletteColorCount = computed(() => {
+  if (
+    chartType.value === 'line' ||
+    chartType.value === 'area' ||
+    chartType.value === 'scatter' ||
+    chartType.value === 'radar'
+  ) {
+    return dataSeries.value.length
+  }
+  return categories.value.length
+})
+
+function monochromePalette(baseColor = monoBaseColor.value) {
+  return generateMonochromePalette(
+    baseColor,
+    requiredPaletteColorCount.value,
+  )
+}
+
+function applyMonochromePalette(baseColor = monoBaseColor.value) {
+  const palette = monochromePalette(baseColor)
+  styleSettings.value = {
+    ...styleSettings.value,
+    palette,
+    paletteOpacities: palette.map(() => 100),
+  }
+  selectedPaletteId.value = 'mono'
+}
+
+function updateMonoBaseColor(value: string) {
+  const normalized = normalizeHexColor(value)
+  if (!normalized) return
+  monoBaseColor.value = normalized
+  applyMonochromePalette(normalized)
 }
 
 function selectChartType(nextType: ChartType) {
@@ -245,8 +290,9 @@ function selectNewUiChartType(nextType: ChartType) {
 
 function resetCurrentStyle() {
   const next = createStylePreset(chartType.value)
-  next.palette = [...monoPalette]
-  next.paletteOpacities = monoPalette.map(() => 100)
+  const palette = monochromePalette()
+  next.palette = palette
+  next.paletteOpacities = palette.map(() => 100)
   styleSettings.value = next
   styleSnapshots.set(chartType.value, cloneStyleSettings(next))
   selectedPaletteId.value = 'mono'
@@ -256,6 +302,11 @@ function applyPalette(presetId: Exclude<PalettePresetId, 'custom'>) {
   const preset = PALETTE_PRESETS.find((item) => item.id === presetId)
   if (!preset) return
 
+  if (preset.id === 'mono') {
+    applyMonochromePalette()
+    return
+  }
+
   styleSettings.value = {
     ...styleSettings.value,
     palette: [...preset.colors],
@@ -264,10 +315,24 @@ function applyPalette(presetId: Exclude<PalettePresetId, 'custom'>) {
   selectedPaletteId.value = preset.id
 }
 
+function palettePresetPreview(
+  presetId: Exclude<PalettePresetId, 'custom'>,
+  colors: string[],
+) {
+  return presetId === 'mono'
+    ? monochromePalette().slice(0, 4)
+    : colors.slice(0, 4)
+}
+
 function applyNewPalette(
   presetId: Exclude<PalettePresetId, 'custom'> | 'chalk',
   colors: string[],
 ) {
+  if (presetId === 'mono') {
+    applyMonochromePalette()
+    return
+  }
+
   styleSettings.value = {
     ...styleSettings.value,
     palette: [...colors],
@@ -297,6 +362,14 @@ function markPaletteCustom() {
   styleSettings.value = cloneStyleSettings(styleSettings.value)
   selectedPaletteId.value = 'custom'
 }
+
+watch(
+  requiredPaletteColorCount,
+  () => {
+    if (selectedPaletteId.value === 'mono') applyMonochromePalette()
+  },
+  { flush: 'sync' },
+)
 
 function hexChannels(color: string): [number, number, number] | null {
   const match = color.trim().match(/^#([\da-f]{6})$/i)
@@ -539,6 +612,8 @@ function formatCss(settings: StyleSettings) {
   --chart-select-border-width: ${settings.selectBorderWidth}px;
 
   /* Палитра */
+  --chart-palette-mode: ${selectedPaletteId.value};
+  --chart-mono-base-color: ${monoBaseColor.value};
 ${palette}
 }`
 }
@@ -595,6 +670,11 @@ function applyCssCode(value: string) {
   }
 
   const next = cloneStyleSettings(styleSettings.value)
+  const declaredPaletteMode = declarations.get('palette-mode')?.trim()
+  const declaredMonoBaseColor = normalizeHexColor(
+    declarations.get('mono-base-color') ?? '',
+  )
+  if (declaredMonoBaseColor) monoBaseColor.value = declaredMonoBaseColor
 
   const colorVariables: Array<[string, keyof StyleSettings]> = [
     ['background', 'backgroundColor'],
@@ -809,18 +889,44 @@ function applyCssCode(value: string) {
     }
   })
 
-  next.palette = [...next.palette]
-  next.paletteOpacities = [...next.paletteOpacities]
+  const monoModeRequested = declaredPaletteMode === 'mono'
+  const expectedMonoPalette = monochromePalette()
+  const paletteSnapshot = cssPaletteSnapshot.value
+  let paletteWasEdited = false
+
+  if (monoModeRequested) {
+    next.palette = [...expectedMonoPalette]
+    next.paletteOpacities = expectedMonoPalette.map(() => 100)
+  } else {
+    next.palette = [...next.palette]
+    next.paletteOpacities = [...next.paletteOpacities]
+  }
+
   next.palette.forEach((_, index) => {
     const color = normalizeHexColor(
       declarations.get(`color-${index + 1}`) ?? '',
     )
-    if (color) next.palette[index] = color
+    const snapshotColor = paletteSnapshot?.colors[index]
+    const colorWasEdited = Boolean(
+      color && snapshotColor && color !== normalizeHexColor(snapshotColor),
+    )
+    if (colorWasEdited) paletteWasEdited = true
+    if (color && (!monoModeRequested || colorWasEdited)) {
+      next.palette[index] = color
+    }
 
     const opacityRaw = declarations.get(`color-${index + 1}-opacity`)
     if (opacityRaw !== undefined) {
       const opacity = numberInRange(opacityRaw, 0, 100)
-      if (opacity !== null) next.paletteOpacities[index] = opacity
+      const snapshotOpacity = paletteSnapshot?.opacities[index]
+      const opacityWasEdited =
+        opacity !== null &&
+        snapshotOpacity !== undefined &&
+        opacity !== snapshotOpacity
+      if (opacityWasEdited) paletteWasEdited = true
+      if (opacity !== null && (!monoModeRequested || opacityWasEdited)) {
+        next.paletteOpacities[index] = opacity
+      }
     }
   })
 
@@ -839,17 +945,29 @@ function applyCssCode(value: string) {
   }
 
   styleSettings.value = next
-  selectedPaletteId.value = 'custom'
+  selectedPaletteId.value =
+    monoModeRequested && !paletteWasEdited ? 'mono' : 'custom'
+}
+
+function beginCssEditing() {
+  isEditingCss.value = true
+  cssPaletteSnapshot.value = {
+    colors: styleSettings.value.palette.map(
+      (color) => normalizeHexColor(color) ?? color,
+    ),
+    opacities: [...styleSettings.value.paletteOpacities],
+  }
 }
 
 function finishCssEditing() {
   isEditingCss.value = false
+  cssPaletteSnapshot.value = null
   cssCode.value = formatCss(styleSettings.value)
 }
 
 watch(
-  styleSettings,
-  (settings) => {
+  [styleSettings, monoBaseColor, selectedPaletteId],
+  ([settings]) => {
     if (!isEditingCss.value) cssCode.value = formatCss(settings)
   },
   { deep: true, immediate: true },
@@ -916,7 +1034,12 @@ function fitTextWithEllipsis(
   fontSize: number,
 ) {
   const ellipsis = '…'
-  const characters = Array.from(text.trimEnd())
+  const normalized = text.trimEnd()
+  if (approximateTextWidth(normalized, fontSize) <= maximumWidth) {
+    return normalized
+  }
+
+  const characters = Array.from(normalized)
   while (
     characters.length > 0 &&
     approximateTextWidth(`${characters.join('')}${ellipsis}`, fontSize) >
@@ -983,22 +1106,6 @@ function wrapTextWithEllipsis(
   return { text: lines.join('\n'), lines }
 }
 
-function addEllipsisToLayout(
-  layout: WrappedTextLayout,
-  maximumWidth: number,
-  fontSize: number,
-): WrappedTextLayout {
-  if (layout.lines.length === 0) return layout
-  if (layout.lines[layout.lines.length - 1].endsWith('…')) return layout
-  const lines = [...layout.lines]
-  lines[lines.length - 1] = fitTextWithEllipsis(
-    lines[lines.length - 1],
-    maximumWidth,
-    fontSize,
-  )
-  return { text: lines.join('\n'), lines }
-}
-
 interface LegendTextLayout {
   visibleNames: string[]
   labels: Record<string, string>
@@ -1011,116 +1118,38 @@ function layoutLegendText(
   maximumWidth: number,
   fontSize: number,
   markerSize: number,
-  itemGap: number,
   vertical: boolean,
-  maximumLines = 3,
 ): LegendTextLayout {
   const measurementFontSize = fontSize * 1.12
-  const availableLabelWidth = maximumWidth - markerSize - itemGap
+  const markerTextGap = 8
+  const availableLabelWidth = maximumWidth - markerSize - markerTextGap
   const labelMaximumWidth = Math.max(
     measurementFontSize * 3,
     vertical
       ? availableLabelWidth
       : Math.min(availableLabelWidth, maximumWidth * 0.58),
   )
-  const rows: Array<{ width: number; lines: number }> = []
-  const visibleNames: string[] = []
   const labels: Record<string, string> = {}
   let widestItem = 0
-  let truncated = false
 
-  for (const [nameIndex, name] of names.entries()) {
-    let layout = wrapTextWithEllipsis(
+  for (const name of names) {
+    const label = fitTextWithEllipsis(
       name,
       labelMaximumWidth,
       measurementFontSize,
-      maximumLines,
     )
-    let textWidth = Math.max(
-      0,
-      ...layout.lines.map((line) =>
-        approximateTextWidth(line, measurementFontSize),
-      ),
+    const textWidth = approximateTextWidth(label, measurementFontSize)
+    labels[name] = label
+    widestItem = Math.max(
+      widestItem,
+      Math.min(maximumWidth, markerSize + markerTextGap + textWidth),
     )
-    let itemWidth = Math.min(
-      maximumWidth,
-      markerSize + Math.round(8) + textWidth,
-    )
-    const previousLineCount = rows.reduce((sum, row) => sum + row.lines, 0)
-    const currentRow = rows[rows.length - 1]
-    const startsNewRow =
-      vertical || !currentRow || currentRow.width + itemGap + itemWidth > maximumWidth
-    let nextRowLines = Math.max(1, layout.lines.length)
-    let nextTotalLines = startsNewRow
-      ? previousLineCount + nextRowLines
-      : previousLineCount - currentRow.lines + Math.max(currentRow.lines, nextRowLines)
-
-    if (nextTotalLines > maximumLines) {
-      const allowedLines = startsNewRow
-        ? maximumLines - previousLineCount
-        : currentRow.lines + maximumLines - previousLineCount
-      if (allowedLines <= 0) {
-        truncated = true
-        break
-      }
-      layout = wrapTextWithEllipsis(
-        name,
-        labelMaximumWidth,
-        measurementFontSize,
-        allowedLines,
-      )
-      textWidth = Math.max(
-        0,
-        ...layout.lines.map((line) =>
-          approximateTextWidth(line, measurementFontSize),
-        ),
-      )
-      itemWidth = Math.min(
-        maximumWidth,
-        markerSize + Math.round(8) + textWidth,
-      )
-      nextRowLines = Math.max(1, layout.lines.length)
-      nextTotalLines = startsNewRow
-        ? previousLineCount + nextRowLines
-        : previousLineCount - currentRow.lines +
-          Math.max(currentRow.lines, nextRowLines)
-      truncated = nameIndex < names.length - 1 || layout.text.endsWith('…')
-    }
-
-    if (startsNewRow) {
-      rows.push({ width: itemWidth, lines: nextRowLines })
-    } else {
-      currentRow.width += itemGap + itemWidth
-      currentRow.lines = Math.max(currentRow.lines, nextRowLines)
-    }
-    visibleNames.push(name)
-    labels[name] = layout.text
-    widestItem = Math.max(widestItem, itemWidth)
-    if (truncated || nextTotalLines >= maximumLines) {
-      truncated = nameIndex < names.length - 1 || layout.text.endsWith('…')
-      break
-    }
-  }
-
-  if (truncated && visibleNames.length > 0) {
-    const lastName = visibleNames[visibleNames.length - 1]
-    const lastLayout = wrapTextWithEllipsis(
-      labels[lastName],
-      labelMaximumWidth,
-      measurementFontSize,
-      maximumLines,
-    )
-    labels[lastName] = addEllipsisToLayout(
-      lastLayout,
-      labelMaximumWidth,
-      measurementFontSize,
-    ).text
   }
 
   return {
-    visibleNames,
+    visibleNames: [...names],
     labels,
-    lineCount: rows.reduce((sum, row) => sum + row.lines, 0),
+    lineCount: names.length === 0 ? 0 : vertical ? names.length : 1,
     widestItem,
   }
 }
@@ -1151,6 +1180,24 @@ function topLegendFitsTitle(legendItems: string[], showTitle: boolean) {
 }
 
 function randomizeChartStyle() {
+  if (isNewUi.value) {
+    const currentKind = activeNewUiChartKind()
+    const kinds: NewUiChartKind[] = [
+      'columns',
+      'rows',
+      'doughnut',
+      'pie',
+      'line',
+    ]
+    const alternatives = kinds.filter((kind) => kind !== currentKind)
+    selectNewUiChartKind(randomChoice(alternatives))
+  } else {
+    const alternatives = chartTypes
+      .map(({ value }) => value)
+      .filter((type) => type !== chartType.value)
+    selectChartType(randomChoice(alternatives))
+  }
+
   const baseHue = randomInteger(0, 359)
   const harmony = [0, 28, 58, 142, 178, 214, 264, 310, 336]
   const palette = harmony.map((offset, index) =>
@@ -1171,6 +1218,14 @@ function randomizeChartStyle() {
         ? 31
         : randomValueLabelSize + 1
       : randomValueLabelSize
+  const showValueLabels =
+    currentType === 'line'
+      ? !styleSettings.value.showValueLabels
+      : randomBoolean(0.48)
+  const valueLabelPosition = randomChoice<BarValuePosition>([
+    'inside',
+    'top',
+  ])
   const pieOuterRadius = randomInteger(64, 92)
   const pieInnerRadius =
     currentType === 'doughnut'
@@ -1183,9 +1238,33 @@ function randomizeChartStyle() {
   ])
   let showLines = randomBoolean(0.82)
   let showLineSymbols = randomBoolean(0.5)
+  let lineWidth = randomInteger(2, 18)
+  let lineSymbolSize = randomInteger(5, 22)
   if (currentType === 'line' && !showLines && !showLineSymbols) {
     if (randomBoolean(0.7)) showLines = true
     else showLineSymbols = true
+  }
+  if (
+    currentType === 'line' &&
+    showValueLabels &&
+    valueLabelPosition === 'inside'
+  ) {
+    const safeLineLabelBackgroundSize = Math.min(
+      MAX_LINE_WIDTH_PX,
+      nextValueLabelSize + 12,
+    )
+    const safeSymbolLabelBackgroundSize = Math.min(
+      MAX_LINE_WIDTH_PX,
+      nextValueLabelSize + 18,
+    )
+    if (randomBoolean()) {
+      showLineSymbols = true
+      lineSymbolSize = safeSymbolLabelBackgroundSize
+    } else {
+      showLines = true
+      showLineSymbols = false
+      lineWidth = safeLineLabelBackgroundSize
+    }
   }
   const showTitle = randomBoolean(0.88)
   const showLegend = presentation && currentType === 'line'
@@ -1238,10 +1317,7 @@ function randomizeChartStyle() {
     showYAxisLabels: presentation && currentType === 'line'
       ? true
       : randomBoolean(0.72),
-    showValueLabels:
-      currentType === 'line'
-        ? !styleSettings.value.showValueLabels
-        : randomBoolean(0.48),
+    showValueLabels,
     labelAlignment,
     titleAlignment,
     showTitle,
@@ -1262,16 +1338,14 @@ function randomizeChartStyle() {
     barRoundPeaks: randomBoolean(0.72),
     barMaxWidth: randomInteger(42, 150),
     barOpacity: randomInteger(72, 100),
-    barValuePosition: randomChoice<BarValuePosition>(['inside', 'top']),
-    barCategoryPosition: currentKind === 'rows'
-      ? 'inside'
-      : randomChoice<BarCategoryPosition>(['axis', 'inside']),
+    barValuePosition: valueLabelPosition,
+    barCategoryPosition: randomChoice<BarCategoryPosition>(['axis', 'inside']),
     colorBarsByData: randomBoolean(0.76),
     commonBarColor: randomBoolean(0.18),
     gradientBars: randomBoolean(0.48),
     showLines,
     lineShape,
-    lineWidth: randomInteger(2, 18),
+    lineWidth,
     lineOpacity: randomInteger(70, 100),
     lineType: randomChoice<LineStyleType>([
       'solid',
@@ -1280,7 +1354,7 @@ function randomizeChartStyle() {
     ]),
     smoothLines: lineShape === 'smooth',
     showLineSymbols,
-    lineSymbolSize: randomInteger(5, 22),
+    lineSymbolSize,
     lineStep: lineShape === 'step' ? 'middle' : 'none',
     showLineArea: randomBoolean(0.5),
     areaOpacity: randomInteger(12, 54),
@@ -1794,22 +1868,6 @@ watch(
   { flush: 'sync' },
 )
 
-watch(
-  [isNewUi, chartType, () => styleSettings.value.barHorizontal],
-  () => {
-    if (
-      !isNewUi.value ||
-      chartType.value !== 'bar' ||
-      !styleSettings.value.barHorizontal ||
-      styleSettings.value.barCategoryPosition === 'inside'
-    ) {
-      return
-    }
-    styleSettings.value.barCategoryPosition = 'inside'
-  },
-  { flush: 'sync', immediate: true },
-)
-
 const newUiOption = computed<ChartOption>(() => {
   const settingsSnapshot = JSON.parse(styleRevision.value) as StyleSettings
   const scale = newUiChartScale.value
@@ -1842,8 +1900,8 @@ const newUiOption = computed<ChartOption>(() => {
     8,
     Math.round(settingsSnapshot.legendGap * scale),
   )
-  const legendIsVertical =
-    resolvedLegendPosition === 'left' || resolvedLegendPosition === 'right'
+  const legendOrientation = getLegendOrientation(resolvedLegendPosition)
+  const legendIsVertical = legendOrientation === 'vertical'
   const legendMaximumWidth = legendIsVertical
     ? Math.max(
         96,
@@ -1859,9 +1917,7 @@ const newUiOption = computed<ChartOption>(() => {
         legendMaximumWidth,
         legendFontSize,
         legendMarkerSize,
-        legendItemGap,
         legendIsVertical,
-        3,
       )
     : {
         visibleNames: [],
@@ -1871,10 +1927,20 @@ const newUiOption = computed<ChartOption>(() => {
       }
   const legendIsVisible =
     settingsSnapshot.showLegend && legendTextLayout.visibleNames.length > 0
-  const legendContentHeight = legendIsVisible
-    ? Math.max(legendLineHeight, legendTextLayout.lineCount * legendLineHeight)
-    : 0
   const legendOuterGap = Math.round(12 * scale)
+  const legendRequiredHeight = legendIsVertical
+    ? legendTextLayout.lineCount * legendLineHeight +
+      Math.max(0, legendTextLayout.lineCount - 1) * legendItemGap
+    : Math.max(legendLineHeight, legendMarkerSize)
+  const legendAvailableHeight = Math.max(
+    legendLineHeight,
+    chartStageSize.value.height - titleReserve - legendOuterGap * 2,
+  )
+  const legendContentHeight = legendIsVisible
+    ? legendIsVertical
+      ? Math.min(legendRequiredHeight, legendAvailableHeight)
+      : legendRequiredHeight
+    : 0
   const legendTop = titleReserve > 0 ? titleReserve : legendOuterGap
   const legendVerticalReserve = legendIsVisible
     ? legendContentHeight + legendOuterGap * 2
@@ -1894,6 +1960,17 @@ const newUiOption = computed<ChartOption>(() => {
     legendIsVisible && resolvedLegendPosition === 'bottom'
       ? legendVerticalReserve
       : 0
+  const legendSideTop = Math.round(
+    topContentReserve +
+      Math.max(
+        0,
+        (chartStageSize.value.height -
+          topContentReserve -
+          bottomContentReserve -
+          legendContentHeight) /
+          2,
+      ),
+  )
   const categoryCount = Math.max(1, categories.value.length)
   const categoryAxisLength = kind === 'rows'
     ? Math.max(
@@ -1917,6 +1994,7 @@ const newUiOption = computed<ChartOption>(() => {
   const occupiedBarUnits =
     visibleBarCount + Math.max(0, visibleBarCount - 1) * seriesGapRatio
   const automaticBarThickness = occupiedCategoryBand / occupiedBarUnits
+  const fillsCategoryBand = settingsSnapshot.barGapPercent <= 0
   const scaledValueLabelSize = Math.round(
     settingsSnapshot.valueLabelSize * scale,
   )
@@ -1936,7 +2014,9 @@ const newUiOption = computed<ChartOption>(() => {
       )
     : 2 * scale
   const requestedBarThickness =
-    settingsSnapshot.barWidth > 0
+    fillsCategoryBand
+      ? automaticBarThickness
+      : settingsSnapshot.barWidth > 0
       ? settingsSnapshot.barWidth * scale
       : settingsSnapshot.barMaxWidth * scale
   const actualBarThickness = Math.max(
@@ -1946,21 +2026,31 @@ const newUiOption = computed<ChartOption>(() => {
   const proportionalBarRadius =
     (actualBarThickness / 2) *
     (Math.min(120, Math.max(0, settingsSnapshot.barRadius)) / 120)
+  const usesDefaultRowAxisLabels =
+    kind === 'rows' && settingsSnapshot.barCategoryPosition === 'axis'
+  const categoryAxisLabelSize = usesDefaultRowAxisLabels
+    ? settingsSnapshot.xAxisLabelSize
+    : settingsSnapshot.yAxisLabelSize
+  const categoryAxisLabelMargin = usesDefaultRowAxisLabels
+    ? settingsSnapshot.xAxisLabelMargin
+    : settingsSnapshot.yAxisLabelMargin
   const styled = applyChartStyle(rawOption.value, {
     ...settingsSnapshot,
     legendPosition: resolvedLegendPosition,
-    barCategoryPosition:
-      kind === 'rows' ? 'inside' : settingsSnapshot.barCategoryPosition,
+    barCategoryPosition: settingsSnapshot.barCategoryPosition,
     barRadius: proportionalBarRadius,
     backgroundColor: 'transparent',
     textColor: '#000000',
     mutedTextColor: '#000000',
+    categoryLabelColor: usesDefaultRowAxisLabels
+      ? '#000000'
+      : settingsSnapshot.categoryLabelColor,
     xAxisLabelSize: Math.round(settingsSnapshot.xAxisLabelSize * scale),
-    yAxisLabelSize: Math.round(settingsSnapshot.yAxisLabelSize * scale),
+    yAxisLabelSize: Math.round(categoryAxisLabelSize * scale),
     valueLabelSize: scaledValueLabelSize,
     pieLabelSize: Math.round(settingsSnapshot.pieLabelSize * scale),
     xAxisLabelMargin: Math.round(settingsSnapshot.xAxisLabelMargin * scale),
-    yAxisLabelMargin: Math.round(settingsSnapshot.yAxisLabelMargin * scale),
+    yAxisLabelMargin: Math.round(categoryAxisLabelMargin * scale),
     barWidth:
       settingsSnapshot.barWidth > 0
         ? Math.round(settingsSnapshot.barWidth * scale)
@@ -2078,7 +2168,7 @@ const newUiOption = computed<ChartOption>(() => {
     styled.legend = {
       ...styled.legend,
       show: legendIsVisible,
-      type: 'plain',
+      type: 'scroll',
       data: legendTextLayout.visibleNames,
       formatter: legendFormatter,
       itemWidth: legendMarkerSize,
@@ -2086,7 +2176,7 @@ const newUiOption = computed<ChartOption>(() => {
       itemGap: legendItemGap,
       width: legendMaximumWidth,
       height: legendContentHeight,
-      orient: legendIsVertical ? 'vertical' : 'horizontal',
+      orient: legendOrientation,
       left:
         resolvedLegendPosition === 'left'
           ? legendOuterGap
@@ -2099,7 +2189,7 @@ const newUiOption = computed<ChartOption>(() => {
         resolvedLegendPosition === 'top'
           ? legendTop
           : legendIsVertical
-            ? titleReserve + legendOuterGap
+            ? legendSideTop
             : undefined,
       bottom:
         resolvedLegendPosition === 'bottom' ? legendOuterGap : undefined,
@@ -2107,7 +2197,7 @@ const newUiOption = computed<ChartOption>(() => {
         ...(styled.legend.textStyle ?? {}),
         fontSize: legendFontSize,
         lineHeight: legendLineHeight,
-        overflow: 'breakAll',
+        overflow: 'truncate',
       },
     }
   }
@@ -2247,6 +2337,7 @@ async function copyOption() {
         :chart-type="chartType"
         :chart-title="chartTitle"
         :selected-palette-id="selectedPaletteId"
+        :mono-base-color="monoBaseColor"
         :series="dataSeries"
         :data-row-count="categories.length"
         :pie-warnings="pieWarnings"
@@ -2257,6 +2348,7 @@ async function copyOption() {
         @select-columns-bar="selectColumnBar"
         @select-horizontal-bar="selectHorizontalBar"
         @apply-palette="applyNewPalette"
+        @update:mono-base-color="updateMonoBaseColor"
         @mark-palette-custom="markPaletteCustom"
         @add-palette-color="addPaletteColor"
         @randomize="randomizeChartStyle"
@@ -3470,7 +3562,7 @@ async function copyOption() {
                 >
                   <span class="palette-preview" aria-hidden="true">
                     <i
-                      v-for="color in preset.colors.slice(0, 4)"
+                      v-for="color in palettePresetPreview(preset.id, preset.colors)"
                       :key="color"
                       :style="{ background: color }"
                     />
@@ -3479,6 +3571,14 @@ async function copyOption() {
                 </button>
               </div>
               <div class="color-controls">
+                <label v-if="selectedPaletteId === 'mono'">
+                  <span>Основной цвет</span>
+                  <HexColorInput
+                    :model-value="monoBaseColor"
+                    label="Основной цвет одноцветной палитры"
+                    @update:model-value="updateMonoBaseColor"
+                  />
+                </label>
                 <label>
                   <span>Фон</span>
                   <HexColorInput
@@ -3661,7 +3761,7 @@ async function copyOption() {
                   :value="cssCode"
                   spellcheck="false"
                   aria-label="CSS-код постерного стиля"
-                  @focus="isEditingCss = true"
+                  @focus="beginCssEditing"
                   @input="applyCssCode(($event.target as HTMLTextAreaElement).value)"
                   @blur="finishCssEditing"
                 />
@@ -3685,6 +3785,7 @@ async function copyOption() {
           :chart-type="chartType"
           :chart-title="chartTitle"
           :selected-palette-id="selectedPaletteId"
+          :mono-base-color="monoBaseColor"
           :series="dataSeries"
           :data-row-count="categories.length"
           :pie-warnings="pieWarnings"
@@ -3695,6 +3796,7 @@ async function copyOption() {
           @select-columns-bar="selectColumnBar"
           @select-horizontal-bar="selectHorizontalBar"
           @apply-palette="applyNewPalette"
+          @update:mono-base-color="updateMonoBaseColor"
           @mark-palette-custom="markPaletteCustom"
           @add-palette-color="addPaletteColor"
           @randomize="randomizeChartStyle"
