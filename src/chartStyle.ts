@@ -124,7 +124,6 @@ export interface ChartStyleConfig {
   barCategoryPosition?: BarCategoryPosition
   colorBarsByData?: boolean
   commonBarColor?: boolean
-  gradientBars?: boolean
   showBarBackground?: boolean
   barBackgroundColor?: string
 
@@ -314,7 +313,6 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   barCategoryPosition: 'axis',
   colorBarsByData: true,
   commonBarColor: false,
-  gradientBars: false,
   showBarBackground: false,
   barBackgroundColor: '#202027',
 
@@ -442,23 +440,6 @@ function darkenHexColor(hex: string, percentage: number) {
 
 function seriesDarkening(seriesIndex: number, seriesCount: number) {
   return seriesCount > 1 ? Math.min(seriesIndex * 20, 90) : 0
-}
-
-function makeGradient(color: string, opacity: number, horizontal: boolean) {
-  const transparent = hexToRgba(color, Math.max(8, opacity * 0.28))
-  const solid = hexToRgba(color, opacity)
-
-  return {
-    type: 'linear',
-    x: 0,
-    y: horizontal ? 0 : 1,
-    x2: horizontal ? 1 : 0,
-    y2: 0,
-    colorStops: [
-      { offset: 0, color: transparent },
-      { offset: 1, color: solid },
-    ],
-  }
 }
 
 function getPaletteColor(
@@ -618,7 +599,10 @@ function styleAxis(
       config.barHorizontal ||
       config.barArrangement === 'horizontal')
   const categoryInside =
-    isCategory && config.barCategoryPosition === 'inside' && !verticalBarCategoryAxis
+    isCategory &&
+    config.barCategoryPosition === 'inside' &&
+    !verticalBarCategoryAxis &&
+    (config.barHorizontal || config.barArrangement === 'horizontal')
   const showLabels =
     dimension === 'x' ? config.showXAxisLabels : config.showYAxisLabels
   const labelSize =
@@ -785,7 +769,13 @@ export function getMinimumBarWidthForValues(
   series: EChartsOption,
   config: ResolvedChartStyle,
 ) {
-  if (!config.showValueLabels || !Array.isArray(series.data)) return 0
+  if (
+    !config.showValueLabels ||
+    config.barValuePosition !== 'inside' ||
+    !Array.isArray(series.data)
+  ) {
+    return 0
+  }
 
   const font = `${config.valueLabelWeight} ${config.valueLabelSize}px ${config.fontFamily}`
   const widestValue = series.data.reduce((maximum: number, item: unknown) => {
@@ -897,17 +887,6 @@ function styleBarSeries(
             ? dataIndex
             : seriesIndex
         const itemColor = getPaletteColor(config, paletteIndex, darkenBy)
-        const palette = config.palette.length > 0
-          ? config.palette
-          : DEFAULT_PALETTE
-        const rawColor = darkenHexColor(
-          palette[paletteIndex % palette.length],
-          darkenBy,
-        )
-        const opacity =
-          config.paletteOpacities[
-            paletteIndex % config.paletteOpacities.length
-          ] ?? 100
         const source =
           item !== null && typeof item === 'object' && !Array.isArray(item)
             ? item
@@ -937,9 +916,7 @@ function styleBarSeries(
           ...source,
           itemStyle: {
             ...source.itemStyle,
-            color: config.gradientBars
-              ? makeGradient(rawColor, opacity, horizontal)
-              : itemColor,
+            color: itemColor,
             borderRadius: itemBorderRadius,
           },
           label: {
@@ -1020,10 +997,16 @@ function styleBarSeries(
         ? { formatter: valueFormatter(config) }
         : {}),
     },
-    labelLayout: {
-      hideOverlap: true,
-      ...series.labelLayout,
-    },
+    labelLayout: config.presentationMode
+      ? {
+          ...series.labelLayout,
+          hideOverlap: false,
+          moveOverlap: horizontal ? 'shiftX' : 'shiftY',
+        }
+      : {
+          hideOverlap: true,
+          ...series.labelLayout,
+        },
     ...seriesStates(series, color, config),
   }
 }

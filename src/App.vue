@@ -95,6 +95,14 @@ interface DataSeries {
   values: Array<number | null>
 }
 
+interface ImportedTableData {
+  categories: string[]
+  series: Array<{
+    name: string
+    values: Array<number | null>
+  }>
+}
+
 type StyleSettings = ResolvedChartStyle
 
 const initialCategories = ['Апрель', 'Май', 'Июнь', 'Июль', 'Август']
@@ -540,7 +548,6 @@ function formatCss(settings: StyleSettings) {
   --chart-bar-value-position: ${settings.barValuePosition};
   --chart-bar-category-position: ${settings.barCategoryPosition};
   --chart-common-bar-color: ${Number(settings.commonBarColor)};
-  --chart-gradient-bars: ${Number(settings.gradientBars)};
   --chart-color-bars-by-data: ${Number(settings.colorBarsByData)};
   --chart-show-bar-background: ${Number(settings.showBarBackground)};
   --chart-bar-background-color: ${settings.barBackgroundColor};
@@ -805,7 +812,6 @@ function applyCssCode(value: string) {
     ['bar-round-peaks', 'barRoundPeaks'],
     ['bar-horizontal', 'barHorizontal'],
     ['common-bar-color', 'commonBarColor'],
-    ['gradient-bars', 'gradientBars'],
     ['color-bars-by-data', 'colorBarsByData'],
     ['show-bar-background', 'showBarBackground'],
     ['line-show', 'showLines'],
@@ -1339,10 +1345,14 @@ function randomizeChartStyle() {
     barMaxWidth: randomInteger(42, 150),
     barOpacity: randomInteger(72, 100),
     barValuePosition: valueLabelPosition,
-    barCategoryPosition: randomChoice<BarCategoryPosition>(['axis', 'inside']),
+    // Only horizontal bars may place category labels inside their bars.
+    // Cartesian X-axis labels must always remain below the axis line.
+    barCategoryPosition:
+      currentKind === 'rows'
+        ? randomChoice<BarCategoryPosition>(['axis', 'inside'])
+        : 'axis',
     colorBarsByData: randomBoolean(0.76),
     commonBarColor: randomBoolean(0.18),
-    gradientBars: randomBoolean(0.48),
     showLines,
     lineShape,
     lineWidth,
@@ -1430,6 +1440,8 @@ function removeSeries(seriesId: number) {
 }
 
 function transposeData() {
+  if (categories.value.length === 0 || dataSeries.value.length === 0) return
+
   const previousCategories = [...categories.value]
   const previousSeries = dataSeries.value.map((item) => ({
     ...item,
@@ -1439,7 +1451,16 @@ function transposeData() {
   dataSeries.value = previousCategories.map((name, categoryIndex) => ({
     id: nextSeriesId.value++,
     name,
-    values: previousSeries.map((item) => item.values[categoryIndex] ?? 0),
+    values: previousSeries.map((item) => item.values[categoryIndex] ?? null),
+  }))
+}
+
+function importTableData(importedData: ImportedTableData) {
+  categories.value = [...importedData.categories]
+  dataSeries.value = importedData.series.map((item) => ({
+    id: nextSeriesId.value++,
+    name: item.name,
+    values: [...item.values],
   }))
 }
 
@@ -1871,6 +1892,7 @@ watch(
 const newUiOption = computed<ChartOption>(() => {
   const settingsSnapshot = JSON.parse(styleRevision.value) as StyleSettings
   const scale = newUiChartScale.value
+  const safeContentInset = Math.max(8, Math.round(12 * scale))
   const kind = activeNewUiChartKind()
   const rowsLegendPosition: 'top' | 'bottom' =
     settingsSnapshot.legendPosition === 'top' ? 'top' : 'bottom'
@@ -2019,9 +2041,9 @@ const newUiOption = computed<ChartOption>(() => {
       : settingsSnapshot.barWidth > 0
       ? settingsSnapshot.barWidth * scale
       : settingsSnapshot.barMaxWidth * scale
-  const actualBarThickness = Math.max(
-    minimumBarThickness,
-    Math.min(requestedBarThickness, automaticBarThickness),
+  const actualBarThickness = Math.min(
+    automaticBarThickness,
+    Math.max(minimumBarThickness, requestedBarThickness),
   )
   const proportionalBarRadius =
     (actualBarThickness / 2) *
@@ -2113,23 +2135,26 @@ const newUiOption = computed<ChartOption>(() => {
       } = styled.grid ?? {}
       styled.grid = {
         ...responsiveGrid,
-        left: resolvedLegendPosition === 'left' ? legendSideReserve : 0,
-        right: resolvedLegendPosition === 'right' ? legendSideReserve : 0,
-        top: topContentReserve,
-        bottom: bottomContentReserve,
+        left:
+          safeContentInset +
+          (resolvedLegendPosition === 'left' ? legendSideReserve : 0),
+        right:
+          safeContentInset +
+          (resolvedLegendPosition === 'right' ? legendSideReserve : 0),
+        top: topContentReserve + safeContentInset,
+        bottom: bottomContentReserve + safeContentInset,
       }
     } else {
       styled.grid = {
         ...(styled.grid ?? {}),
-        top: topContentReserve,
-        bottom: bottomContentReserve,
-        ...(resolvedLegendPosition === 'left'
-          ? { left: legendSideReserve }
-          : {}),
-        right: 0,
-        ...(resolvedLegendPosition === 'right'
-          ? { right: legendSideReserve }
-          : {}),
+        left:
+          safeContentInset +
+          (resolvedLegendPosition === 'left' ? legendSideReserve : 0),
+        right:
+          safeContentInset +
+          (resolvedLegendPosition === 'right' ? legendSideReserve : 0),
+        top: topContentReserve + safeContentInset,
+        bottom: bottomContentReserve + safeContentInset,
       }
     }
   }
@@ -2151,14 +2176,14 @@ const newUiOption = computed<ChartOption>(() => {
 
     styled.grid = {
       ...(styled.grid ?? {}),
-      top: topContentReserve,
-      bottom: bottomContentReserve,
-      ...(resolvedLegendPosition === 'left'
-        ? { left: legendSideReserve }
-        : {}),
-      ...(resolvedLegendPosition === 'right'
-        ? { right: legendSideReserve }
-        : {}),
+      left:
+        safeContentInset +
+        (resolvedLegendPosition === 'left' ? legendSideReserve : 0),
+      right:
+        safeContentInset +
+        (resolvedLegendPosition === 'right' ? legendSideReserve : 0),
+      top: topContentReserve + safeContentInset,
+      bottom: bottomContentReserve + safeContentInset,
     }
   }
 
@@ -2367,6 +2392,7 @@ async function copyOption() {
             @add-row="addRow"
             @add-series="addSeries"
             @transpose="transposeData"
+            @import="importTableData"
             @clear="clearDataValues"
           />
         </template>
@@ -2380,7 +2406,7 @@ async function copyOption() {
         :style="newUiChartStageStyle"
       >
         <VChart
-          :key="`new-${renderer}-${chartTheme}-${styleMode}`"
+          :key="`new-${activeNewUiChartKind()}-${renderer}-${chartTheme}-${styleMode}`"
           class="chart"
           :option="newUiOption"
           :init-options="{ renderer }"
@@ -2576,11 +2602,6 @@ async function copyOption() {
                   <input v-model="styleSettings.commonBarColor" type="checkbox" />
                   <span aria-hidden="true" />
                   Общий цвет
-                </label>
-                <label class="switch-control">
-                  <input v-model="styleSettings.gradientBars" type="checkbox" />
-                  <span aria-hidden="true" />
-                  Градиент к вершине
                 </label>
                 <label class="switch-control">
                   <input
@@ -3887,7 +3908,7 @@ async function copyOption() {
             :style="chartStageStyle"
           >
             <VChart
-              :key="`${renderer}-${chartTheme}-${styleMode}`"
+              :key="`${chartType}-${renderer}-${chartTheme}-${styleMode}`"
               class="chart"
               :option="option"
               :init-options="{ renderer }"

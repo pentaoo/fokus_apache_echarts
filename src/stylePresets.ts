@@ -264,7 +264,6 @@ export function createNewUiStylePreset(
     barCategoryPosition: isRows ? 'inside' : 'axis',
     colorBarsByData: true,
     commonBarColor: false,
-    gradientBars: false,
     showLines: true,
     lineShape: 'straight',
     smoothLines: false,

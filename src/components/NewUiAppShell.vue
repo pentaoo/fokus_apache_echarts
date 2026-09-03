@@ -75,6 +75,12 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
 
 <style scoped>
 .new-ui-app-shell {
+  --new-ui-slide-available-width: calc(100cqw - 637px);
+  --new-ui-slide-max-height: calc(100vh - 180px);
+  --new-ui-slide-width: min(
+    var(--new-ui-slide-available-width),
+    calc(var(--new-ui-slide-max-height) * 16 / 9)
+  );
   position: relative;
   width: 100%;
   min-width: 1024px;
@@ -219,8 +225,11 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
 
 .new-ui-object-toolbar {
   position: absolute;
-  top: calc(56.25cqw - 250.3125px);
-  right: 40px;
+  top: calc(108px + var(--new-ui-slide-width) * 9 / 16);
+  right: calc(
+    40px +
+      (var(--new-ui-slide-available-width) - var(--new-ui-slide-width)) / 2
+  );
   display: flex;
   height: 32px;
   align-items: center;
@@ -299,12 +308,16 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
   top: 0;
   right: 0;
   left: 581px;
+  display: flex;
+  align-items: center;
   padding: 100px 40px 0 16px;
+  flex-direction: column;
   pointer-events: none;
 }
 
 .new-ui-chart-card {
-  width: 100%;
+  width: var(--new-ui-slide-width);
+  max-width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   padding: 24px;
@@ -435,7 +448,8 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
   }
 
   .new-ui-chart-card {
-    aspect-ratio: 4 / 3;
+    width: 100%;
+    aspect-ratio: 16 / 9;
   }
 }
 

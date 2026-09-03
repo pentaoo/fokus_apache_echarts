@@ -560,7 +560,6 @@ function setPieNames(show: boolean) {
           <div
             class="new-design-palette-card"
             :class="{
-              'has-gradient-toggle': chartType === 'bar',
               'has-mono-base': selectedPaletteId === 'mono',
             }"
           >
@@ -592,11 +591,6 @@ function setPieNames(show: boolean) {
               </button>
             </div>
           </div>
-          <label v-if="chartType === 'bar'" class="new-design-switch-row last">
-            <span>Градиентная заливка</span>
-            <input v-model="settings.gradientBars" type="checkbox" />
-            <i aria-hidden="true" />
-          </label>
         </div>
       </section>
 
@@ -1593,30 +1587,22 @@ input:focus-visible {
   gap: 2px;
 }
 
-.new-design-palette-card.has-gradient-toggle {
-  border-radius: 26px 26px 4px 4px;
-}
-
 .new-design-mono-base-card {
   min-height: 72px;
   align-items: center;
   border-radius: 26px 26px 4px 4px;
 }
 
-.new-design-mono-base-card > span {
-  padding-top: 0;
-}
-
 .new-design-palette-card.has-mono-base {
   border-radius: 4px 4px 26px 26px;
 }
 
-.new-design-palette-card.has-mono-base.has-gradient-toggle {
-  border-radius: 4px;
-}
-
 .new-design-palette-card > span {
   padding-top: 10px;
+}
+
+.new-design-mono-base-card > span {
+  padding-top: 0;
 }
 
 .new-design-palette-list {

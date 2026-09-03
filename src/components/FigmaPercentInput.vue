@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps<{
   modelValue: number
@@ -13,12 +13,15 @@ const emit = defineEmits<{
   'update:modelValue': [value: number]
 }>()
 
+const inputElement = ref<HTMLInputElement | null>(null)
 const draft = ref('')
 const editing = ref(false)
+const scrubbing = ref(false)
+let stopScrub: (() => void) | null = null
 
 function clamp(value: number) {
-  const minimum = props.minimum ?? 0
-  const maximum = props.maximum ?? 100
+  const minimum = Math.ceil(props.minimum ?? 0)
+  const maximum = Math.floor(props.maximum ?? 100)
   return Math.min(maximum, Math.max(minimum, Math.round(value)))
 }
 
@@ -45,6 +48,71 @@ function finishEditing() {
   syncDraft(props.modelValue)
 }
 
+function setValue(value: number) {
+  const nextValue = clamp(value)
+  draft.value = String(nextValue)
+  emit('update:modelValue', nextValue)
+}
+
+function startScrub(event: PointerEvent) {
+  if (props.disabled || event.button !== 0 || !event.isPrimary) return
+
+  event.preventDefault()
+  stopScrub?.()
+
+  const startX = event.clientX
+  const startY = event.clientY
+  const startValue = props.modelValue
+  let didScrub = false
+
+  const move = (moveEvent: PointerEvent) => {
+    const horizontalDistance = moveEvent.clientX - startX
+    const verticalDistance = startY - moveEvent.clientY
+    const distance =
+      Math.abs(horizontalDistance) >= Math.abs(verticalDistance)
+        ? horizontalDistance
+        : verticalDistance
+
+    if (!didScrub && Math.abs(distance) < 3) return
+    didScrub = true
+    scrubbing.value = true
+    setValue(startValue + distance / 5)
+  }
+
+  const finish = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    stopScrub = null
+    scrubbing.value = false
+
+    if (!didScrub) {
+      inputElement.value?.focus({ preventScroll: true })
+      inputElement.value?.select()
+    }
+  }
+
+  stopScrub = finish
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', finish, { once: true })
+  window.addEventListener('pointercancel', finish, { once: true })
+}
+
+function onScrubKeydown(event: KeyboardEvent) {
+  if (props.disabled) return
+
+  const step = event.shiftKey ? 10 : 1
+  let nextValue: number | undefined
+  if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nextValue = props.modelValue + step
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') nextValue = props.modelValue - step
+  else if (event.key === 'Home') nextValue = props.minimum ?? 0
+  else if (event.key === 'End') nextValue = props.maximum ?? 100
+
+  if (nextValue === undefined) return
+  event.preventDefault()
+  setValue(nextValue)
+}
+
 watch(
   () => props.modelValue,
   (value) => {
@@ -52,11 +120,14 @@ watch(
   },
   { immediate: true },
 )
+
+onBeforeUnmount(() => stopScrub?.())
 </script>
 
 <template>
-  <div class="figma-percent-input">
+  <div class="figma-percent-input" :class="{ scrubbing }">
     <input
+      ref="inputElement"
       v-model="draft"
       type="text"
       inputmode="numeric"
@@ -69,16 +140,28 @@ watch(
       @blur="finishEditing"
       @keydown.enter.prevent="finishEditing"
     />
-    <span aria-hidden="true">%</span>
+    <span
+      class="figma-percent-scrubber"
+      role="slider"
+      :tabindex="disabled ? -1 : 0"
+      :aria-label="`${label}: изменить перетаскиванием`"
+      :aria-valuemin="Math.ceil(minimum ?? 0)"
+      :aria-valuemax="Math.floor(maximum ?? 100)"
+      :aria-valuenow="clamp(modelValue)"
+      :aria-valuetext="`${clamp(modelValue)} процентов`"
+      title="Потяните, чтобы изменить значение"
+      @pointerdown="startScrub"
+      @keydown="onScrubKeydown"
+    >%</span>
   </div>
 </template>
 
 <style scoped>
 .figma-percent-input {
   display: flex;
-  width: 66px;
-  height: 42px;
-  min-width: 66px;
+  width: 67px;
+  height: 40px;
+  min-width: 67px;
   align-items: center;
   justify-content: flex-end;
   gap: 0;
@@ -93,8 +176,8 @@ watch(
   flex: 1 1 auto;
   width: 0;
   min-width: 0;
-  height: 40px;
-  min-height: 40px;
+  height: 38px;
+  min-height: 38px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -106,17 +189,46 @@ watch(
   text-align: right;
 }
 
-.figma-percent-input span {
+.figma-percent-scrubber {
+  position: relative;
+  display: inline-flex;
+  height: 20px;
   flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
   padding: 0 2px;
   color: #8d8b91;
+  cursor: ew-resize;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
+  touch-action: none;
+  user-select: none;
+}
+
+.figma-percent-scrubber::after {
+  position: absolute;
+  inset: 8px -6px;
+  content: "";
+}
+
+.figma-percent-scrubber:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #5500eb;
+  outline-offset: 1px;
+}
+
+.figma-percent-input.scrubbing,
+.figma-percent-input.scrubbing * {
+  cursor: ew-resize;
 }
 
 .figma-percent-input:has(input:disabled) {
   cursor: not-allowed;
   opacity: 0.42;
+}
+
+.figma-percent-input:has(input:disabled) .figma-percent-scrubber {
+  cursor: not-allowed;
 }
 </style>
