@@ -1,0 +1,669 @@
+// Generated from public/palette-catalog/palettes.json. Keep both files in sync.
+import type { Palette } from './types'
+
+export const PALETTE_LIBRARY: Palette[] = [
+  {
+    "id": "L01",
+    "name": "Чернила и глина",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#243B53",
+      "#C16546",
+      "#387E78",
+      "#C47494",
+      "#8B4774",
+      "#9B8B78",
+      "#5D663F",
+      "#2993AA",
+      "#A78532",
+      "#6575A5"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L02",
+    "name": "Вербена",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#66347F",
+      "#7C862C",
+      "#C34D63",
+      "#354971",
+      "#798698",
+      "#9B4938",
+      "#397B89",
+      "#B87B32",
+      "#496D50",
+      "#A16A8D"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L03",
+    "name": "Киноварь",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#B83742",
+      "#276E8E",
+      "#A07726",
+      "#303D39",
+      "#9B738C",
+      "#753B64",
+      "#6D7735",
+      "#4A4C77",
+      "#CC7247",
+      "#388174"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L04",
+    "name": "Архив",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#274D76",
+      "#B77728",
+      "#746881",
+      "#613E32",
+      "#CD9183",
+      "#23252E",
+      "#A84B71",
+      "#AAA446",
+      "#49664C",
+      "#388C9A"
+    ],
+    "accessibilityCandidate": true
+  },
+  {
+    "id": "L05",
+    "name": "Сухой сад",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#536338",
+      "#AF613D",
+      "#466F84",
+      "#A38B35",
+      "#554677",
+      "#B5A692",
+      "#8E395A",
+      "#238F92",
+      "#38484A",
+      "#C06D85"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L06",
+    "name": "Кобальтовая печать",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#344EAB",
+      "#C14B78",
+      "#39846D",
+      "#633962",
+      "#777DB4",
+      "#995629",
+      "#249AAC",
+      "#AC6860",
+      "#555D46",
+      "#C19316"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L07",
+    "name": "Портвейн",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#713748",
+      "#258077",
+      "#B97C36",
+      "#565F8F",
+      "#24463E",
+      "#A15486",
+      "#5A713A",
+      "#DF8A69",
+      "#483D5C",
+      "#8E8171"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L08",
+    "name": "Медный атлас",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#96551F",
+      "#475C91",
+      "#328078",
+      "#883E67",
+      "#7F852B",
+      "#BA6572",
+      "#384A51",
+      "#B07E58",
+      "#4D6C40",
+      "#8D739F"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L09",
+    "name": "Минеральный индекс",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#3F576C",
+      "#A26427",
+      "#8D809A",
+      "#5B62A0",
+      "#BC7363",
+      "#33312C",
+      "#257B8D",
+      "#683E4E",
+      "#28794F",
+      "#989047"
+    ],
+    "accessibilityCandidate": true
+  },
+  {
+    "id": "L10",
+    "name": "Горький цитрус",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#7E841E",
+      "#733E79",
+      "#C25D32",
+      "#2D757B",
+      "#A0799C",
+      "#493D36",
+      "#92704F",
+      "#426299",
+      "#448255",
+      "#B23B65"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D01",
+    "name": "Ночной шёлк",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#DB879F",
+      "#57B7AF",
+      "#C7A15A",
+      "#8F96DB",
+      "#8C7252",
+      "#E4D0CA",
+      "#B879BF",
+      "#87AB70",
+      "#D66B4D",
+      "#5996BD"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D02",
+    "name": "Павлин",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#27C3B0",
+      "#DD813D",
+      "#9982ED",
+      "#BDBB62",
+      "#BE53B3",
+      "#6C9950",
+      "#DD6B91",
+      "#5899C5",
+      "#DDCFB4",
+      "#A64D53"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D03",
+    "name": "Поздний аперитив",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#EF8854",
+      "#788DB9",
+      "#D4B156",
+      "#A84E78",
+      "#74C3A9",
+      "#996D38",
+      "#C9ACDA",
+      "#929844",
+      "#ECC9AD",
+      "#397E88"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D04",
+    "name": "Электрический ирис",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#AA8BE4",
+      "#C9BC4F",
+      "#39CCAF",
+      "#DC7396",
+      "#4F975E",
+      "#DCA9B7",
+      "#95559D",
+      "#DADEC6",
+      "#709ADF",
+      "#D59555"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D05",
+    "name": "Латунь и сталь",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#D0A349",
+      "#719BC5",
+      "#E4D7C4",
+      "#BD7556",
+      "#44C5C2",
+      "#7767BD",
+      "#D88A9B",
+      "#686E6E",
+      "#C0C59A",
+      "#9A7188"
+    ],
+    "accessibilityCandidate": true
+  },
+  {
+    "id": "D06",
+    "name": "Лес после дождя",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#A3C780",
+      "#E5ADA7",
+      "#59A5B5",
+      "#D8894A",
+      "#387F69",
+      "#A685BD",
+      "#B29438",
+      "#667DB8",
+      "#E6CF9E",
+      "#A1516C"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D07",
+    "name": "Малиновый бархат",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#EC568E",
+      "#4BC7D0",
+      "#E5B86B",
+      "#527DA9",
+      "#EE835C",
+      "#5A9868",
+      "#BD449C",
+      "#DEC4D2",
+      "#8C74CD",
+      "#A6A13B"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D08",
+    "name": "Титан",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#AEC6D1",
+      "#C58152",
+      "#9785AD",
+      "#AF5267",
+      "#6EAE9E",
+      "#506CA0",
+      "#B5B47F",
+      "#4798B0",
+      "#EDDBCB",
+      "#8A6D45"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D09",
+    "name": "Шафрановый клуб",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#E4C129",
+      "#8375D6",
+      "#42B19F",
+      "#E0BAD2",
+      "#427C9F",
+      "#C79864",
+      "#7AAEDB",
+      "#E56754",
+      "#9BBD59",
+      "#CB68AB"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "D10",
+    "name": "Солёный коралл",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#E2947C",
+      "#90CDD0",
+      "#C8BE89",
+      "#856695",
+      "#EAD7CC",
+      "#A78332",
+      "#647FC6",
+      "#709767",
+      "#D494B4",
+      "#388E84"
+    ],
+    "accessibilityCandidate": false
+  },
+  {
+    "id": "L11",
+    "name": "Коралловый сигнал",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#118AB2",
+      "#FF7F50",
+      "#06D6A0",
+      "#6B4C8A",
+      "#7A7E2C",
+      "#C04B72",
+      "#2D7F6F",
+      "#FFD166",
+      "#385D77",
+      "#C97B3A"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "L12",
+    "name": "Багряный архив",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#321325",
+      "#CB793A",
+      "#5F0F40",
+      "#8D633E",
+      "#FCDC4D",
+      "#3F6C78",
+      "#A85573",
+      "#617A45",
+      "#9A031E",
+      "#66758A"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "D11",
+    "name": "Северная бумага",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#92B6B1",
+      "#666A86",
+      "#E8DDB5",
+      "#6F986B",
+      "#C27B62",
+      "#788AA3",
+      "#B2C9AB",
+      "#8F6684",
+      "#7AA7C2",
+      "#B08A3E"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "D12",
+    "name": "Орхидея и лёд",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#8447FF",
+      "#8CFFDA",
+      "#D76A45",
+      "#D972FF",
+      "#83A64B",
+      "#FFB2E6",
+      "#4389B8",
+      "#FFFFE8",
+      "#C35C82",
+      "#D6B43C"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "D13",
+    "name": "Пыльный горизонт",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#7C5869",
+      "#AFD2E9",
+      "#7E9360",
+      "#CF825E",
+      "#9D96B8",
+      "#D3B460",
+      "#6C72A5",
+      "#886176",
+      "#4E8190",
+      "#9A7197"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "D14",
+    "name": "Коралловый фарфор",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#9DF6F6",
+      "#F56B61",
+      "#8A85C7",
+      "#B9A141",
+      "#3E9290",
+      "#F3CA8C",
+      "#C46E5F",
+      "#8AA873",
+      "#B45C87",
+      "#DAA386"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "L13",
+    "name": "Четыре редакции",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#1874C1",
+      "#EE4C3C",
+      "#1DA849",
+      "#B14475",
+      "#6F7927",
+      "#F9B6AF",
+      "#596B87",
+      "#FFBD19",
+      "#7356A5",
+      "#9B5A32"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "L14",
+    "name": "Манговый выпуск",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#2D4059",
+      "#EA5455",
+      "#2B8176",
+      "#FFD460",
+      "#73518B",
+      "#A06D28",
+      "#5377A1",
+      "#B55D86",
+      "#F07B3F",
+      "#8A754C"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "D15",
+    "name": "Ультрафиолетовый час",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#865DFF",
+      "#FFA3FD",
+      "#49B6AE",
+      "#A57786",
+      "#E3B84F",
+      "#191825",
+      "#6E94C2",
+      "#D66E58",
+      "#E384FF",
+      "#72A55A"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "L15",
+    "name": "Паприка и нефть",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#0F4C5C",
+      "#FB8B24",
+      "#5F0F40",
+      "#9C748C",
+      "#9A031E",
+      "#377E78",
+      "#B39B43",
+      "#536E9A",
+      "#E36414",
+      "#557F47"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "D16",
+    "name": "Глаукус",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#360568",
+      "#A5E6BA",
+      "#C9804D",
+      "#7785AC",
+      "#CFB74A",
+      "#6F9A65",
+      "#D45F85",
+      "#9AC6C5",
+      "#5B2A86",
+      "#B395BF"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "D17",
+    "name": "Прусский персик",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#70A288",
+      "#D5896F",
+      "#6C7FD1",
+      "#A55278",
+      "#C8C3A5",
+      "#04395E",
+      "#99B84D",
+      "#4EA6B0",
+      "#DAB785",
+      "#031D44"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  },
+  {
+    "id": "L16",
+    "name": "Оксид и море",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#244A5A",
+      "#B84D3A",
+      "#407D68",
+      "#84618B",
+      "#B58B2A",
+      "#345D92",
+      "#9A6D57",
+      "#809431",
+      "#B75E82",
+      "#1995AD"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "editorial-original"
+  },
+  {
+    "id": "L17",
+    "name": "Кислая типографика",
+    "recommendedBackground": "#FFFFFF",
+    "colors": [
+      "#3946A0",
+      "#C43F6B",
+      "#5E842E",
+      "#A05A26",
+      "#237D83",
+      "#C48B22",
+      "#314E72",
+      "#A9867B",
+      "#6E3F78",
+      "#3B4932"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "editorial-original"
+  },
+  {
+    "id": "D18",
+    "name": "После полуночи",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#50B7AE",
+      "#DF725D",
+      "#A58BE2",
+      "#D1B44E",
+      "#C65F98",
+      "#E0B9A7",
+      "#76599D",
+      "#8DAE67",
+      "#5E91C8",
+      "#B5834E"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "editorial-original"
+  },
+  {
+    "id": "D19",
+    "name": "Шафрановый эфир",
+    "recommendedBackground": "#050608",
+    "colors": [
+      "#F28C21",
+      "#7298C7",
+      "#B4B535",
+      "#7A4E86",
+      "#E36887",
+      "#3C8B82",
+      "#F5D890",
+      "#51616F",
+      "#A74C63",
+      "#8C7040"
+    ],
+    "accessibilityCandidate": false,
+    "origin": "user-reference"
+  }
+]

@@ -4,4 +4,12 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   base: '/fokus_apache_echarts/',
   plugins: [vue()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        paletteCatalog: 'palette-catalog.html',
+      },
+    },
+  },
 })

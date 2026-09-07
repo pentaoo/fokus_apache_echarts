@@ -22,6 +22,10 @@ export type PalettePresetId =
   | 'accessible'
   | 'custom'
 
+export type CatalogPaletteId = `catalog-${'L' | 'D'}${number}`
+
+export type PaletteSelectionId = PalettePresetId | CatalogPaletteId | 'chalk'
+
 export interface PalettePreset {
   id: Exclude<PalettePresetId, 'custom'>
   name: string

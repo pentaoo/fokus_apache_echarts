@@ -20,6 +20,7 @@ interface ImportedSeries {
 }
 
 interface ImportedTableData {
+  categoryColumnName: string
   categories: string[]
   series: ImportedSeries[]
 }
@@ -30,11 +31,13 @@ const IMPORT_FILE_TYPES = '.xlsx,.csv,.tsv,text/csv,text/tab-separated-values,ap
 const MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024
 
 const props = defineProps<{
+  categoryColumnName: string
   categories: string[]
   series: DataSeries[]
 }>()
 
 const emit = defineEmits<{
+  'update-category-column-name': [value: string]
   'update-category': [index: number, value: string]
   'update-series-name': [seriesId: number, value: string]
   'update-number': [seriesId: number, rowIndex: number, value: string]
@@ -303,7 +306,11 @@ function normalizeImportedTable(sourceRows: SpreadsheetCell[][]): ImportedTableD
     throw new Error('Не найдено числовых значений для графика')
   }
 
-  return { categories, series }
+  return {
+    categoryColumnName: cellToLabel(rows[0]?.[0]) || 'Категория',
+    categories,
+    series,
+  }
 }
 
 async function readSpreadsheet(file: File): Promise<SpreadsheetCell[][]> {
@@ -370,7 +377,16 @@ onBeforeUnmount(() => {
                 </button>
               </th>
               <th class="content-column category-header">
-                <input value="Месяц" readonly aria-label="Название колонки категорий" />
+                <input
+                  :value="categoryColumnName"
+                  type="text"
+                  data-grid-cell
+                  data-row="0"
+                  data-column="0"
+                  aria-label="Название колонки категорий"
+                  @input="emit('update-category-column-name', ($event.target as HTMLInputElement).value)"
+                  @keydown="onCellKeydown"
+                />
               </th>
               <th v-for="(seriesItem, seriesIndex) in series" :key="seriesItem.id" class="content-column series-header">
                 <input

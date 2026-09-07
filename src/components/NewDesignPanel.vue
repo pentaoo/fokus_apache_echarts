@@ -11,6 +11,7 @@ import type {
   LabelAlignment,
   LineShape,
   LineStyleType,
+  LegendPosition,
   ResolvedChartStyle,
 } from '../chartStyle'
 import {
@@ -22,7 +23,12 @@ import {
   MIN_LINE_WIDTH_PX,
   MIN_PIE_RING_THICKNESS_PX,
 } from '../chartStyle'
-import type { ChartType, PalettePresetId } from '../stylePresets'
+import { PALETTE_LIBRARY } from '../paletteCatalog/paletteLibrary'
+import type {
+  CatalogPaletteId,
+  ChartType,
+  PaletteSelectionId,
+} from '../stylePresets'
 import alignCenterIcon from '../assets/new-ui/align-center.svg'
 import alignLeftIcon from '../assets/new-ui/align-left.svg'
 import alignRightIcon from '../assets/new-ui/align-right.svg'
@@ -30,13 +36,15 @@ import clearIcon from '../assets/new-ui/clear-mark.svg'
 import columnsIcon from '../assets/new-ui/columns-purple.svg'
 import doughnutIcon from '../assets/new-ui/doughnut.svg'
 import lineIcon from '../assets/new-ui/line.svg'
+import legendPositionActiveIcon from '../assets/new-ui/legend-position-active.svg'
+import legendPositionIcon from '../assets/new-ui/legend-position.svg'
 import orderRandomIcon from '../assets/new-ui/order-random.svg'
 import orderReversedIcon from '../assets/new-ui/order-reversed.svg'
 import pieIcon from '../assets/new-ui/pie.svg'
 import rowsIcon from '../assets/new-ui/rows.svg'
 
 interface PaletteChoice {
-  id: Exclude<PalettePresetId, 'custom'> | 'chalk'
+  id: Exclude<PaletteSelectionId, 'custom'>
   name: string
   colors: string[]
 }
@@ -50,13 +58,13 @@ const props = defineProps<{
   settings: ResolvedChartStyle
   chartType: ChartType
   chartTitle: string
-  selectedPaletteId: PalettePresetId | 'chalk'
+  selectedPaletteId: PaletteSelectionId
   monoBaseColor: string
   series: PanelSeries[]
   dataRowCount: number
   pieWarnings: string[]
   pieMaximumRadiusPx: number
-  barGapMaximum: number
+  barWidthMinimum: number
 }>()
 
 const emit = defineEmits<{
@@ -68,12 +76,13 @@ const emit = defineEmits<{
   'update:mono-base-color': [value: string]
   'mark-palette-custom': []
   'add-palette-color': []
+  'randomize-palette': []
   'randomize': []
   'clear': []
   close: []
 }>()
 
-const paletteChoices: PaletteChoice[] = [
+const featuredPaletteChoices: PaletteChoice[] = [
   {
     id: 'mono',
     name: 'Одноцветная',
@@ -101,6 +110,37 @@ const paletteChoices: PaletteChoice[] = [
   },
 ]
 
+const retainedCatalogPaletteIds = [
+  'L02',
+  'L06',
+  'L10',
+  'L11',
+  'L13',
+  'D01',
+  'D02',
+  'D04',
+  'D05',
+  'D18',
+] as const
+
+const retainedCatalogPaletteChoices: PaletteChoice[] =
+  retainedCatalogPaletteIds.map((paletteId) => {
+    const palette = PALETTE_LIBRARY.find((item) => item.id === paletteId)
+    if (!palette) throw new Error(`Palette ${paletteId} is missing`)
+
+    return {
+    id: `catalog-${palette.id}` as CatalogPaletteId,
+    name: `${palette.id} ${palette.name}`,
+    colors: palette.colors,
+    }
+  })
+
+const paletteRows: PaletteChoice[][] = [
+  featuredPaletteChoices,
+  retainedCatalogPaletteChoices.slice(0, 5),
+  retainedCatalogPaletteChoices.slice(5, 10),
+]
+
 const typeChoices: Array<{
   id: 'columns' | 'rows' | 'doughnut' | 'pie' | 'line'
   label: string
@@ -125,6 +165,18 @@ const activeType = computed(() => {
 const circular = computed(
   () => props.chartType === 'pie' || props.chartType === 'doughnut',
 )
+
+const barWidthPercent = computed({
+  get: () =>
+    Math.min(
+      100,
+      Math.max(props.barWidthMinimum, 100 - props.settings.barGapPercent),
+    ),
+  set: (value: number) => {
+    const width = Math.min(100, Math.max(props.barWidthMinimum, value))
+    props.settings.barGapPercent = 100 - width
+  },
+})
 
 const valuesVisible = computed({
   get: () =>
@@ -190,9 +242,9 @@ const monochromePreview = computed(() =>
   generateMonochromePalette(props.monoBaseColor, 5),
 )
 
-const presetScroll = ref<HTMLElement | null>(null)
 const presetDragging = ref(false)
 const openPaletteIndex = ref<number | null>(null)
+let presetDragElement: HTMLElement | null = null
 let presetPointerId: number | null = null
 let presetDragStartX = 0
 let presetDragStartScrollLeft = 0
@@ -209,7 +261,7 @@ function stopPresetInertia() {
 }
 
 function startPresetInertia() {
-  const scroll = presetScroll.value
+  const scroll = presetDragElement
   presetVelocity = Math.min(0.65, Math.max(-0.65, presetVelocity))
   if (!scroll || Math.abs(presetVelocity) < 0.04) return
   let previousTime = performance.now()
@@ -233,11 +285,14 @@ function startPresetInertia() {
 }
 
 function startPresetDrag(event: PointerEvent) {
-  if (event.button !== 0 || !presetScroll.value) return
+  if (event.button !== 0) return
+  const scroll = event.currentTarget as HTMLElement | null
+  if (!scroll) return
   stopPresetInertia()
+  presetDragElement = scroll
   presetPointerId = event.pointerId
   presetDragStartX = event.clientX
-  presetDragStartScrollLeft = presetScroll.value.scrollLeft
+  presetDragStartScrollLeft = scroll.scrollLeft
   presetDidDrag = false
   presetLastX = event.clientX
   presetLastTime = performance.now()
@@ -245,7 +300,7 @@ function startPresetDrag(event: PointerEvent) {
 }
 
 function movePresetDrag(event: PointerEvent) {
-  const scroll = presetScroll.value
+  const scroll = presetDragElement
   if (!scroll || presetPointerId !== event.pointerId) return
   const offset = event.clientX - presetDragStartX
   if (!presetDidDrag && Math.abs(offset) < 4) return
@@ -269,7 +324,7 @@ function movePresetDrag(event: PointerEvent) {
 }
 
 function finishPresetDrag(event: PointerEvent) {
-  const scroll = presetScroll.value
+  const scroll = presetDragElement
   if (!scroll || presetPointerId !== event.pointerId) return
   if (scroll.hasPointerCapture(event.pointerId)) scroll.releasePointerCapture(event.pointerId)
   presetPointerId = null
@@ -279,6 +334,8 @@ function finishPresetDrag(event: PointerEvent) {
     window.setTimeout(() => {
       presetDidDrag = false
     })
+  } else {
+    presetDragElement = null
   }
 }
 
@@ -308,7 +365,9 @@ function setPalette(choice: PaletteChoice) {
 }
 
 function palettePreview(choice: PaletteChoice) {
-  return choice.id === 'mono' ? monochromePreview.value : choice.colors
+  return choice.id === 'mono'
+    ? monochromePreview.value.slice(0, 5)
+    : choice.colors.slice(0, 5)
 }
 
 function updatePaletteColor(index: number, value: string) {
@@ -353,14 +412,6 @@ function rangeStyle(value: number, minimum: number, maximum: number) {
 
 function updateBarRadiusPercent(value: number) {
   props.settings.barRadius = value * 1.2
-}
-
-function updateBarWidthPercent(value: number) {
-  props.settings.barMaxWidth = 20 + value * 1.6
-}
-
-function updateBarGapPercent(value: number) {
-  props.settings.barGapPercent = Math.min(props.barGapMaximum, value)
 }
 
 function updatePieOuterRadius(value: number) {
@@ -509,35 +560,50 @@ function setPieNames(show: boolean) {
 
     <div class="new-design-settings">
       <section class="new-design-section colors-section">
-        <h3>Палитра</h3>
-        <div
-          ref="presetScroll"
-          class="new-design-preset-scroll"
-          :class="{ dragging: presetDragging }"
-          @pointerdown="startPresetDrag"
-          @pointermove="movePresetDrag"
-          @pointerup="finishPresetDrag"
-          @pointercancel="finishPresetDrag"
-          @click.capture="preventPresetClick"
-        >
+        <div class="new-design-section-heading">
+          <h3>Палитра</h3>
           <button
-            v-for="choice in paletteChoices"
-            :key="choice.id"
+            class="new-design-random"
             type="button"
-            class="new-design-preset"
-            :class="{ active: selectedPaletteId === choice.id }"
-            :aria-pressed="selectedPaletteId === choice.id"
-            @click="setPalette(choice)"
+            aria-label="Случайная палитра"
+            title="Случайная палитра"
+            @click="emit('randomize-palette')"
           >
-            <span>{{ choice.name }}</span>
-            <span class="new-design-dots" aria-hidden="true">
-              <i
-                v-for="color in palettePreview(choice)"
-                :key="color"
-                :style="{ backgroundColor: color }"
-              />
-            </span>
+            Случайная
           </button>
+        </div>
+        <div class="new-design-preset-rows">
+          <div
+            v-for="(row, rowIndex) in paletteRows"
+            :key="rowIndex"
+            class="new-design-preset-scroll"
+            :class="{ dragging: presetDragging }"
+            @pointerdown="startPresetDrag"
+            @pointermove="movePresetDrag"
+            @pointerup="finishPresetDrag"
+            @pointercancel="finishPresetDrag"
+            @click.capture="preventPresetClick"
+          >
+            <button
+              v-for="choice in row"
+              :key="choice.id"
+              type="button"
+              class="new-design-preset"
+              :class="{ active: selectedPaletteId === choice.id }"
+              :aria-pressed="selectedPaletteId === choice.id"
+              :aria-label="choice.name"
+              :title="choice.colors.join(', ')"
+              @click="setPalette(choice)"
+            >
+              <span class="new-design-dots" aria-hidden="true">
+                <i
+                  v-for="color in palettePreview(choice)"
+                  :key="color"
+                  :style="{ backgroundColor: color }"
+                />
+              </span>
+            </button>
+          </div>
         </div>
 
         <div class="new-design-palette-stack">
@@ -863,34 +929,17 @@ function setPieNames(show: boolean) {
           <div class="new-design-range-row">
             <span>Ширина</span>
             <input
-              v-model.number="settings.barMaxWidth"
+              v-model.number="barWidthPercent"
               type="range"
-              min="20"
-              max="180"
+              :min="barWidthMinimum"
+              max="100"
               aria-label="Ширина колонок"
-              :style="rangeStyle(settings.barMaxWidth, 20, 180)"
+              :style="rangeStyle(barWidthPercent, barWidthMinimum, 100)"
             />
             <FigmaPercentInput
-              :model-value="Math.round(((settings.barMaxWidth - 20) / 160) * 100)"
+              v-model="barWidthPercent"
               label="Ширина колонок в процентах"
-              @update:model-value="updateBarWidthPercent"
-            />
-          </div>
-          <div class="new-design-range-row">
-            <span>Расстояние между колонок</span>
-            <input
-              v-model.number="settings.barGapPercent"
-              type="range"
-              min="0"
-              :max="barGapMaximum"
-              aria-label="Расстояние между колонками"
-              :style="rangeStyle(settings.barGapPercent, 0, barGapMaximum)"
-            />
-            <FigmaPercentInput
-              :model-value="settings.barGapPercent"
-              label="Расстояние между колонками в процентах"
-              :maximum="barGapMaximum"
-              @update:model-value="updateBarGapPercent"
+              :minimum="barWidthMinimum"
             />
           </div>
           <div class="new-design-control-row">
@@ -1198,11 +1247,65 @@ function setPieNames(show: boolean) {
               >Слева за осью</button>
             </div>
           </div>
-          <label class="new-design-switch-row last">
+          <label
+            class="new-design-switch-row"
+            :class="{ last: !settings.showLegend }"
+          >
             <span>Легенда</span>
-            <input v-model="settings.showLegend" type="checkbox" />
+            <input
+              id="new-design-show-legend"
+              v-model="settings.showLegend"
+              type="checkbox"
+              :aria-expanded="settings.showLegend"
+              aria-controls="new-design-legend-details"
+            />
             <i aria-hidden="true" />
           </label>
+          <Transition name="new-design-disclosure">
+            <div
+              v-if="settings.showLegend"
+              id="new-design-legend-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <div class="new-design-control-row">
+                  <span>Расположение легенды</span>
+                  <div
+                    class="new-design-icon-tabs legend-position-tabs"
+                    aria-label="Расположение легенды"
+                  >
+                    <button
+                      v-for="choice in [
+                        { value: 'left', label: 'Слева' },
+                        { value: 'right', label: 'Справа' },
+                        { value: 'bottom', label: 'Снизу' },
+                        { value: 'top', label: 'Сверху' },
+                      ]"
+                      :key="choice.value"
+                      type="button"
+                      :class="{ active: settings.legendPosition === choice.value }"
+                      :aria-label="choice.label"
+                      :aria-pressed="settings.legendPosition === choice.value"
+                      @click="settings.legendPosition = choice.value as LegendPosition"
+                    >
+                      <img
+                        :class="`legend-position-${choice.value}`"
+                        :src="settings.legendPosition === choice.value
+                          ? legendPositionActiveIcon
+                          : legendPositionIcon"
+                        alt=""
+                      />
+                    </button>
+                  </div>
+                </div>
+                <label class="new-design-switch-row last">
+                  <span>Все элементы сразу</span>
+                  <input v-model="settings.showAllLegendItems" type="checkbox" />
+                  <i aria-hidden="true" />
+                </label>
+              </div>
+            </div>
+          </Transition>
         </div>
       </section>
     </div>
@@ -1481,6 +1584,12 @@ input:focus-visible {
   touch-action: pan-y;
 }
 
+.new-design-preset-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .new-design-preset-scroll.dragging,
 .new-design-preset-scroll.dragging * {
   cursor: grabbing;
@@ -1495,7 +1604,7 @@ input:focus-visible {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
   height: 40px;
   min-height: 40px;
   padding: 10px;
@@ -1504,10 +1613,6 @@ input:focus-visible {
   background: #fff;
   font-size: 14px;
   line-height: 16px;
-}
-
-.new-design-preset > span:first-child {
-  padding: 2px 6px;
 }
 
 .new-design-preset:hover {
@@ -1525,26 +1630,6 @@ input:focus-visible {
 
 .new-design-preset.active .new-design-dots i {
   box-shadow: 0 0 0 2px #000;
-}
-
-.new-design-preset:nth-child(1) {
-  width: 223px;
-}
-
-.new-design-preset:nth-child(2) {
-  width: 165px;
-}
-
-.new-design-preset:nth-child(3) {
-  width: 170px;
-}
-
-.new-design-preset:nth-child(4) {
-  width: 163px;
-}
-
-.new-design-preset:nth-child(5) {
-  width: 210px;
 }
 
 .new-design-dots {
@@ -1855,6 +1940,27 @@ input:focus-visible {
   overflow: hidden;
   border-radius: 999px;
   background: #f6f6f6;
+}
+
+.new-design-icon-tabs.legend-position-tabs {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.legend-position-tabs button img {
+  width: 18px;
+  height: 18px;
+}
+
+.legend-position-left {
+  transform: rotate(90deg) scaleY(-1);
+}
+
+.legend-position-right {
+  transform: rotate(90deg);
+}
+
+.legend-position-bottom {
+  transform: scaleY(-1);
 }
 
 .new-design-icon-tabs button,

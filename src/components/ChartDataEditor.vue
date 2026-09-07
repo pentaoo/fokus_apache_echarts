@@ -6,12 +6,14 @@ interface DataSeries {
 }
 
 defineProps<{
+  categoryColumnName: string
   categories: string[]
   series: DataSeries[]
   headingId: string
 }>()
 
 const emit = defineEmits<{
+  'update-category-column-name': [value: string]
   'update-category': [index: number, value: string]
   'update-series-name': [seriesId: number, value: string]
   'update-number': [seriesId: number, rowIndex: number, value: string]
@@ -35,7 +37,15 @@ const emit = defineEmits<{
       <table>
         <thead>
           <tr>
-            <th scope="col">Категория</th>
+            <th scope="col">
+              <input
+                :value="categoryColumnName"
+                class="category-column-name"
+                type="text"
+                aria-label="Название колонки категорий"
+                @input="emit('update-category-column-name', ($event.target as HTMLInputElement).value)"
+              />
+            </th>
             <th
               v-for="seriesItem in series"
               :key="seriesItem.id"

@@ -59,6 +59,7 @@ export interface ChartStyleConfig {
   showTitle?: boolean
   titleAlignment?: LabelAlignment
   showLegend?: boolean
+  showAllLegendItems?: boolean
   legendPosition?: LegendPosition
   legendFontSize?: number
   legendItemSize?: number
@@ -248,6 +249,7 @@ export const DEFAULT_CHART_STYLE: ResolvedChartStyle = {
   showTitle: true,
   titleAlignment: 'center',
   showLegend: true,
+  showAllLegendItems: true,
   legendPosition: 'bottom',
   legendFontSize: 13,
   legendItemSize: 12,
@@ -1466,7 +1468,7 @@ function legendLayout(
 ) {
   const orient = getLegendOrientation(config.legendPosition)
   const common = {
-    type: 'scroll',
+    type: config.showAllLegendItems ? 'plain' : 'scroll',
     itemWidth: config.legendItemSize,
     itemHeight: config.legendItemSize,
     itemGap: config.legendGap,

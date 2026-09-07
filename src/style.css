@@ -271,6 +271,14 @@ td input {
   font-weight: 600;
 }
 
+.category-column-name {
+  width: 100%;
+  min-width: 104px;
+  min-height: 30px;
+  padding-block: 4px;
+  font-weight: 600;
+}
+
 .icon-button {
   width: 30px;
   min-width: 30px;
@@ -1117,6 +1125,23 @@ button:disabled {
   margin-right: 2px;
   color: #555a60;
   font-size: 0.84rem;
+}
+
+.random-background-button {
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid #c7cbd1;
+  border-radius: 18px;
+  color: #25282d;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.random-background-button:hover {
+  border-color: #8f96a0;
+  background: #f5f6f7;
 }
 
 .background-options {

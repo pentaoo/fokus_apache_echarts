@@ -26,7 +26,6 @@ import { generateMonochromePalette } from './colorPalette'
 import {
   applyChartStyle,
   getLegendOrientation,
-  getMinimumBarWidthForValues,
   getMinimumPieThicknessPercent,
   getPieInnerRadius,
   getPieThicknessPercent,
@@ -60,6 +59,7 @@ import {
   type ChartType,
   type NewUiChartKind,
   type PalettePresetId,
+  type PaletteSelectionId,
 } from './stylePresets'
 
 use([
@@ -96,6 +96,7 @@ interface DataSeries {
 }
 
 interface ImportedTableData {
+  categoryColumnName: string
   categories: string[]
   series: Array<{
     name: string
@@ -143,6 +144,7 @@ const backgroundPresets: BackgroundPreset[] = [
 ]
 
 const categories = ref([...initialCategories])
+const categoryColumnName = ref('Месяц')
 const dataSeries = ref<DataSeries[]>(cloneInitialSeries())
 const defaultMonoBaseColor = PALETTE_PRESETS.find(
   (preset) => preset.id === 'mono',
@@ -165,7 +167,7 @@ const cssPaletteSnapshot = ref<{
   colors: string[]
   opacities: number[]
 } | null>(null)
-const selectedPaletteId = ref<PalettePresetId | 'chalk'>('chalk')
+const selectedPaletteId = ref<PaletteSelectionId>('chalk')
 const monoBaseColor = ref(defaultMonoBaseColor)
 const initialStyle = createNewUiStylePreset('columns')
 const styleSettings = ref<StyleSettings>(initialStyle)
@@ -333,7 +335,7 @@ function palettePresetPreview(
 }
 
 function applyNewPalette(
-  presetId: Exclude<PalettePresetId, 'custom'> | 'chalk',
+  presetId: Exclude<PaletteSelectionId, 'custom'>,
   colors: string[],
 ) {
   if (presetId === 'mono') {
@@ -487,6 +489,7 @@ function formatCss(settings: StyleSettings) {
   --chart-show-title: ${Number(settings.showTitle)};
   --chart-title-align: ${settings.titleAlignment};
   --chart-show-legend: ${Number(settings.showLegend)};
+  --chart-show-all-legend: ${Number(settings.showAllLegendItems)};
   --chart-legend-position: ${settings.legendPosition};
   --chart-legend-font-size: ${settings.legendFontSize}px;
   --chart-legend-item-size: ${settings.legendItemSize}px;
@@ -801,6 +804,7 @@ function applyCssCode(value: string) {
   const booleanVariables: Array<[string, keyof StyleSettings]> = [
     ['show-title', 'showTitle'],
     ['show-legend', 'showLegend'],
+    ['show-all-legend', 'showAllLegendItems'],
     ['show-tooltip', 'showTooltip'],
     ['show-x-axis-labels', 'showXAxisLabels'],
     ['show-y-axis-labels', 'showYAxisLabels'],
@@ -991,6 +995,31 @@ function randomBoolean(probability = 0.5) {
   return Math.random() < probability
 }
 
+function randomHexColor(excludedColor?: string | null) {
+  let color = ''
+  do {
+    color = `#${randomInteger(0, 0xffffff)
+      .toString(16)
+      .padStart(6, '0')}`
+  } while (color === excludedColor?.toLowerCase())
+  return color
+}
+
+function readableColors(backgroundColor: string) {
+  const channels = hexChannels(backgroundColor) ?? [255, 255, 255]
+  const [red, green, blue] = channels.map((channel) => {
+    const value = channel / 255
+    return value <= 0.04045
+      ? value / 12.92
+      : Math.pow((value + 0.055) / 1.055, 2.4)
+  })
+  const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
+
+  return luminance > 0.36
+    ? { text: '#000000', muted: '#45454D' }
+    : { text: '#FFFFFF', muted: '#D7D9DE' }
+}
+
 function hslToHex(hue: number, saturation: number, lightness: number) {
   const normalizedSaturation = saturation / 100
   const normalizedLightness = lightness / 100
@@ -1019,6 +1048,26 @@ function hslToHex(hue: number, saturation: number, lightness: number) {
         .padStart(2, '0'),
     )
     .join('')}`
+}
+
+function randomizePalette() {
+  const colorCount = Math.max(5, requiredPaletteColorCount.value)
+  const baseHue = randomInteger(0, 359)
+  const hueStep = 137.508
+  const palette = Array.from({ length: colorCount }, (_, index) =>
+    hslToHex(
+      baseHue + hueStep * index + randomInteger(-12, 12),
+      randomInteger(58, 86),
+      randomInteger(42, 68),
+    ),
+  )
+
+  styleSettings.value = {
+    ...styleSettings.value,
+    palette,
+    paletteOpacities: palette.map(() => 100),
+  }
+  selectedPaletteId.value = 'custom'
 }
 
 function approximateTextWidth(text: string, fontSize: number) {
@@ -1124,6 +1173,7 @@ function layoutLegendText(
   maximumWidth: number,
   fontSize: number,
   markerSize: number,
+  itemGap: number,
   vertical: boolean,
 ): LegendTextLayout {
   const measurementFontSize = fontSize * 1.12
@@ -1137,6 +1187,8 @@ function layoutLegendText(
   )
   const labels: Record<string, string> = {}
   let widestItem = 0
+  let lineCount = names.length === 0 ? 0 : 1
+  let occupiedLineWidth = 0
 
   for (const name of names) {
     const label = fitTextWithEllipsis(
@@ -1146,16 +1198,29 @@ function layoutLegendText(
     )
     const textWidth = approximateTextWidth(label, measurementFontSize)
     labels[name] = label
-    widestItem = Math.max(
-      widestItem,
-      Math.min(maximumWidth, markerSize + markerTextGap + textWidth),
+    const itemWidth = Math.min(
+      maximumWidth,
+      markerSize + markerTextGap + textWidth,
     )
+    widestItem = Math.max(widestItem, itemWidth)
+
+    if (!vertical) {
+      const nextWidth = occupiedLineWidth === 0
+        ? itemWidth
+        : occupiedLineWidth + itemGap + itemWidth
+      if (occupiedLineWidth > 0 && nextWidth > maximumWidth) {
+        lineCount += 1
+        occupiedLineWidth = itemWidth
+      } else {
+        occupiedLineWidth = nextWidth
+      }
+    }
   }
 
   return {
     visibleNames: [...names],
     labels,
-    lineCount: names.length === 0 ? 0 : vertical ? names.length : 1,
+    lineCount: vertical ? names.length : lineCount,
     widestItem,
   }
 }
@@ -1205,6 +1270,10 @@ function randomizeChartStyle() {
   }
 
   const baseHue = randomInteger(0, 359)
+  const backgroundColor = randomHexColor(
+    normalizeHexColor(styleSettings.value.backgroundColor),
+  )
+  const readable = readableColors(backgroundColor)
   const harmony = [0, 28, 58, 142, 178, 214, 264, 310, 336]
   const palette = harmony.map((offset, index) =>
     hslToHex(
@@ -1302,17 +1371,9 @@ function randomizeChartStyle() {
 
   styleSettings.value = {
     ...styleSettings.value,
-    backgroundColor: presentation
-      ? 'transparent'
-      : hslToHex(
-          baseHue + randomInteger(-20, 20),
-          randomInteger(18, 42),
-          randomInteger(4, 14),
-        ),
-    textColor: presentation ? '#000000' : '#ffffff',
-    mutedTextColor: presentation
-      ? '#000000'
-      : hslToHex(baseHue, 18, randomInteger(68, 82)),
+    backgroundColor,
+    textColor: readable.text,
+    mutedTextColor: readable.muted,
     palette,
     paletteOpacities: palette.map(() => randomInteger(78, 100)),
     valueLabelSize: nextValueLabelSize,
@@ -1328,6 +1389,7 @@ function randomizeChartStyle() {
     titleAlignment,
     showTitle,
     showLegend,
+    showAllLegendItems: true,
     legendPosition,
     showTooltip: presentation ? false : true,
     showGridLines: randomBoolean(0.34),
@@ -1386,6 +1448,8 @@ function randomizeChartStyle() {
     showScatterLabels: randomBoolean(0.42),
     radarAreaOpacity: randomInteger(10, 46),
   }
+  customBackground.value = backgroundColor
+  selectedBackgroundId.value = 'custom'
   selectedPaletteId.value = 'custom'
 }
 
@@ -1398,6 +1462,10 @@ function cloneInitialSeries(): DataSeries[] {
 
 function updateCategory(rowIndex: number, value: string) {
   categories.value[rowIndex] = value
+}
+
+function updateCategoryColumnName(value: string) {
+  categoryColumnName.value = value
 }
 
 function updateSeriesName(seriesId: number, value: string) {
@@ -1456,6 +1524,7 @@ function transposeData() {
 }
 
 function importTableData(importedData: ImportedTableData) {
+  categoryColumnName.value = importedData.categoryColumnName
   categories.value = [...importedData.categories]
   dataSeries.value = importedData.series.map((item) => ({
     id: nextSeriesId.value++,
@@ -1472,6 +1541,7 @@ function clearDataValues() {
 }
 
 function resetData() {
+  categoryColumnName.value = 'Месяц'
   categories.value = [...initialCategories]
   dataSeries.value = cloneInitialSeries()
   nextSeriesId.value = 3
@@ -1522,6 +1592,70 @@ const selectedBackground = computed(() => {
     backgroundPresets.find((item) => item.id === selectedBackgroundId.value) ??
     backgroundPresets[0]
   )
+})
+
+const visibleBackgroundPresets = computed(() =>
+  styleMode.value === 'poster'
+    ? backgroundPresets.filter((background) =>
+        Boolean(normalizeHexColor(background.background)),
+      )
+    : backgroundPresets,
+)
+
+function selectBackground(backgroundId: string) {
+  const background = backgroundPresets.find((item) => item.id === backgroundId)
+  if (!background) return
+
+  const color = normalizeHexColor(background.background)
+  if (styleMode.value === 'poster' && !color) return
+
+  selectedBackgroundId.value = backgroundId
+  if (styleMode.value === 'poster' && color) {
+    styleSettings.value.backgroundColor = color
+  }
+}
+
+function updateCustomBackground(value: string) {
+  const color = normalizeHexColor(value)
+  if (!color) return
+
+  customBackground.value = color
+  selectedBackgroundId.value = 'custom'
+  if (styleMode.value === 'poster') {
+    styleSettings.value.backgroundColor = color
+  }
+}
+
+function updateChartBackground(value: string) {
+  const color = normalizeHexColor(value)
+  if (!color) return
+
+  styleSettings.value.backgroundColor = color
+  const preset = backgroundPresets.find(
+    (background) => normalizeHexColor(background.background) === color,
+  )
+  if (preset) {
+    selectedBackgroundId.value = preset.id
+  } else {
+    customBackground.value = color
+    selectedBackgroundId.value = 'custom'
+  }
+}
+
+function randomizeBackground() {
+  const currentColor = normalizeHexColor(selectedBackground.value.background)
+  updateCustomBackground(randomHexColor(currentColor))
+}
+
+watch(styleMode, (nextMode) => {
+  if (nextMode !== 'poster') return
+  const background = selectedBackground.value
+  const color = normalizeHexColor(background.background)
+  if (color) {
+    styleSettings.value.backgroundColor = color
+  } else {
+    selectBackground('white')
+  }
 })
 
 const chartStageStyle = computed((): Record<string, string> => {
@@ -1747,8 +1881,8 @@ const newUiPieMaximumRadius = computed(() =>
   ),
 )
 
-const barGapMaximum = computed(() => {
-  if (!isNewUi.value || chartType.value !== 'bar') return 100
+const barWidthMinimum = computed(() => {
+  if (!isNewUi.value || chartType.value !== 'bar') return 0
 
   const settings = styleSettings.value
   const horizontal =
@@ -1768,7 +1902,7 @@ const barGapMaximum = computed(() => {
   const valueLabelInside =
     settings.showValueLabels && settings.barValuePosition === 'inside'
 
-  if (!categoryLabelInside && !valueLabelInside) return 100
+  if (!categoryLabelInside && !valueLabelInside) return 0
 
   const categoryLabelThickness = categoryLabelInside
     ? settings.yAxisLabelSize * 1.15 + 8
@@ -1788,10 +1922,7 @@ const barGapMaximum = computed(() => {
     valueLabelThickness * occupiedBars,
   )
 
-  return Math.min(
-    100,
-    Math.max(0, Math.floor((1 - requiredBandSize / bandSize) * 100)),
-  )
+  return Math.min(100, Math.max(0, Math.ceil((requiredBandSize / bandSize) * 100)))
 })
 
 const newUiPieOuterRadius = computed(
@@ -1881,10 +2012,11 @@ watch(
 )
 
 watch(
-  [barGapMaximum, () => styleSettings.value.barGapPercent],
-  ([maximum, current]) => {
-    if (current <= maximum) return
-    styleSettings.value.barGapPercent = maximum
+  [barWidthMinimum, () => styleSettings.value.barGapPercent],
+  ([minimumWidth, currentGap]) => {
+    const currentWidth = 100 - currentGap
+    if (currentWidth >= minimumWidth) return
+    styleSettings.value.barGapPercent = 100 - minimumWidth
   },
   { flush: 'sync' },
 )
@@ -1939,6 +2071,7 @@ const newUiOption = computed<ChartOption>(() => {
         legendMaximumWidth,
         legendFontSize,
         legendMarkerSize,
+        legendItemGap,
         legendIsVertical,
       )
     : {
@@ -1950,10 +2083,14 @@ const newUiOption = computed<ChartOption>(() => {
   const legendIsVisible =
     settingsSnapshot.showLegend && legendTextLayout.visibleNames.length > 0
   const legendOuterGap = Math.round(12 * scale)
+  const horizontalLegendLineCount = settingsSnapshot.showAllLegendItems
+    ? legendTextLayout.lineCount
+    : Math.min(1, legendTextLayout.lineCount)
   const legendRequiredHeight = legendIsVertical
     ? legendTextLayout.lineCount * legendLineHeight +
       Math.max(0, legendTextLayout.lineCount - 1) * legendItemGap
-    : Math.max(legendLineHeight, legendMarkerSize)
+    : horizontalLegendLineCount * Math.max(legendLineHeight, legendMarkerSize) +
+      Math.max(0, horizontalLegendLineCount - 1) * legendItemGap
   const legendAvailableHeight = Math.max(
     legendLineHeight,
     chartStageSize.value.height - titleReserve - legendOuterGap * 2,
@@ -2016,35 +2153,10 @@ const newUiOption = computed<ChartOption>(() => {
   const occupiedBarUnits =
     visibleBarCount + Math.max(0, visibleBarCount - 1) * seriesGapRatio
   const automaticBarThickness = occupiedCategoryBand / occupiedBarUnits
-  const fillsCategoryBand = settingsSnapshot.barGapPercent <= 0
   const scaledValueLabelSize = Math.round(
     settingsSnapshot.valueLabelSize * scale,
   )
-  const scaledBarSettings: StyleSettings = {
-    ...settingsSnapshot,
-    valueLabelSize: scaledValueLabelSize,
-  }
-  const minimumBarThickness = kind === 'columns'
-    ? Math.max(
-        2 * scale,
-        ...dataSeries.value.map((series) =>
-          getMinimumBarWidthForValues(
-            { data: series.values },
-            scaledBarSettings,
-          ),
-        ),
-      )
-    : 2 * scale
-  const requestedBarThickness =
-    fillsCategoryBand
-      ? automaticBarThickness
-      : settingsSnapshot.barWidth > 0
-      ? settingsSnapshot.barWidth * scale
-      : settingsSnapshot.barMaxWidth * scale
-  const actualBarThickness = Math.min(
-    automaticBarThickness,
-    Math.max(minimumBarThickness, requestedBarThickness),
-  )
+  const actualBarThickness = automaticBarThickness
   const proportionalBarRadius =
     (actualBarThickness / 2) *
     (Math.min(120, Math.max(0, settingsSnapshot.barRadius)) / 120)
@@ -2073,11 +2185,11 @@ const newUiOption = computed<ChartOption>(() => {
     pieLabelSize: Math.round(settingsSnapshot.pieLabelSize * scale),
     xAxisLabelMargin: Math.round(settingsSnapshot.xAxisLabelMargin * scale),
     yAxisLabelMargin: Math.round(categoryAxisLabelMargin * scale),
-    barWidth:
-      settingsSnapshot.barWidth > 0
-        ? Math.round(settingsSnapshot.barWidth * scale)
-        : 0,
-    barMaxWidth: Math.round(settingsSnapshot.barMaxWidth * scale),
+    // В новом интерфейсе ширина задаётся единственным процентным контролом
+    // через barCategoryGap. Пиксельные ограничения иначе создают «мёртвую»
+    // часть диапазона, когда barMaxWidth уже больше доступной полосы категории.
+    barWidth: 0,
+    barMaxWidth: 0,
   })
 
   if (kind === 'columns' || kind === 'rows') {
@@ -2193,7 +2305,7 @@ const newUiOption = computed<ChartOption>(() => {
     styled.legend = {
       ...styled.legend,
       show: legendIsVisible,
-      type: 'scroll',
+      type: settingsSnapshot.showAllLegendItems ? 'plain' : 'scroll',
       data: legendTextLayout.visibleNames,
       formatter: legendFormatter,
       itemWidth: legendMarkerSize,
@@ -2367,7 +2479,7 @@ async function copyOption() {
         :data-row-count="categories.length"
         :pie-warnings="pieWarnings"
         :pie-maximum-radius-px="newUiPieMaximumRadius"
-        :bar-gap-maximum="barGapMaximum"
+        :bar-width-minimum="barWidthMinimum"
         @update:chart-title="chartTitle = $event"
         @select-chart-type="selectNewUiChartType"
         @select-columns-bar="selectColumnBar"
@@ -2376,14 +2488,17 @@ async function copyOption() {
         @update:mono-base-color="updateMonoBaseColor"
         @mark-palette-custom="markPaletteCustom"
         @add-palette-color="addPaletteColor"
+        @randomize-palette="randomizePalette"
         @randomize="randomizeChartStyle"
         @clear="resetNewDesign"
         @close="uiDesignMode = 'classic'"
       >
         <template #data-editor>
           <NewChartDataEditor
+            :category-column-name="categoryColumnName"
             :categories="categories"
             :series="dataSeries"
+            @update-category-column-name="updateCategoryColumnName"
             @update-category="updateCategory"
             @update-series-name="updateSeriesName"
             @update-number="updateNumberById"
@@ -2452,9 +2567,11 @@ async function copyOption() {
     <div class="workspace">
       <div class="editor-column">
         <ChartDataEditor
+          :category-column-name="categoryColumnName"
           :categories="categories"
           :series="dataSeries"
           heading-id="editor-title"
+          @update-category-column-name="updateCategoryColumnName"
           @update-category="updateCategory"
           @update-series-name="updateSeriesName"
           @update-number="updateNumberById"
@@ -3374,6 +3491,15 @@ async function copyOption() {
                   Легенда
                 </label>
                 <label class="switch-control">
+                  <input
+                    v-model="styleSettings.showAllLegendItems"
+                    :disabled="!styleSettings.showLegend"
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" />
+                  Все элементы сразу
+                </label>
+                <label class="switch-control">
                   <input v-model="styleSettings.showTooltip" type="checkbox" />
                   <span aria-hidden="true" />
                   Подсказки
@@ -3603,8 +3729,9 @@ async function copyOption() {
                 <label>
                   <span>Фон</span>
                   <HexColorInput
-                    v-model="styleSettings.backgroundColor"
+                    :model-value="styleSettings.backgroundColor"
                     label="Цвет фона графика"
+                    @update:model-value="updateChartBackground"
                   />
                 </label>
                 <label>
@@ -3811,7 +3938,7 @@ async function copyOption() {
           :data-row-count="categories.length"
           :pie-warnings="pieWarnings"
           :pie-maximum-radius-px="newUiPieMaximumRadius"
-          :bar-gap-maximum="barGapMaximum"
+          :bar-width-minimum="barWidthMinimum"
           @update:chart-title="chartTitle = $event"
           @select-chart-type="selectNewUiChartType"
           @select-columns-bar="selectColumnBar"
@@ -3862,11 +3989,19 @@ async function copyOption() {
             </div>
           </div>
 
-          <fieldset v-if="styleMode === 'default'" class="background-picker">
+          <fieldset class="background-picker">
             <legend>Фон под графиком</legend>
+            <button
+              type="button"
+              class="random-background-button"
+              title="Сгенерировать случайный HEX-цвет фона"
+              @click="randomizeBackground"
+            >
+              Случайный фон
+            </button>
             <div class="background-options">
               <button
-                v-for="background in backgroundPresets"
+                v-for="background in visibleBackgroundPresets"
                 :key="background.id"
                 class="background-swatch"
                 :class="{ active: selectedBackgroundId === background.id }"
@@ -3875,7 +4010,7 @@ async function copyOption() {
                 :aria-label="`Фон: ${background.name}`"
                 :aria-pressed="selectedBackgroundId === background.id"
                 :style="{ background: background.background }"
-                @click="selectedBackgroundId = background.id"
+                @click="selectBackground(background.id)"
               />
 
               <label
@@ -3884,21 +4019,20 @@ async function copyOption() {
                 title="Свой цвет"
               >
                 <input
-                  v-model="customBackground"
+                  :value="customBackground"
                   type="color"
                   aria-label="Свой цвет фона"
-                  @input="selectedBackgroundId = 'custom'"
-                  @click="selectedBackgroundId = 'custom'"
+                  @input="updateCustomBackground(($event.target as HTMLInputElement).value)"
                 />
                 <span aria-hidden="true">+</span>
               </label>
             </div>
             <span class="background-name">{{ selectedBackground.name }}</span>
             <HexColorInput
-              v-model="customBackground"
+              :model-value="customBackground"
               class="standard-background-hex"
               label="Свой цвет фона"
-              @update:model-value="selectedBackgroundId = 'custom'"
+              @update:model-value="updateCustomBackground"
             />
           </fieldset>
 
