@@ -158,6 +158,7 @@ const renderer = ref<Renderer>('canvas')
 const chartTheme = ref<ChartTheme>('light')
 const styleMode = ref<StyleMode>('poster')
 const uiDesignMode = ref<UiDesignMode>('new')
+const chartTransformMode = ref(false)
 const isNewUi = computed(() => uiDesignMode.value === 'new')
 const chartTitle = ref('Средняя температура')
 const selectedBackgroundId = ref('white')
@@ -2529,6 +2530,7 @@ async function copyOption() {
         :pie-warnings="pieWarnings"
         :pie-maximum-radius-px="newUiPieMaximumRadius"
         :bar-width-minimum="barWidthMinimum"
+        :transform-mode="chartTransformMode"
         @update:chart-title="chartTitle = $event"
         @select-chart-type="selectNewUiChartType"
         @select-columns-bar="selectColumnBar"
@@ -2539,6 +2541,7 @@ async function copyOption() {
         @add-palette-color="addPaletteColor"
         @randomize="randomizeChartStyle"
         @clear="resetNewDesign"
+        @toggle-transform-mode="chartTransformMode = !chartTransformMode"
         @close="uiDesignMode = 'classic'"
       >
         <template #data-editor>
@@ -2563,7 +2566,7 @@ async function copyOption() {
     </template>
 
     <template #chart>
-      <ResizableChartObject>
+      <ResizableChartObject :active="chartTransformMode">
         <div
           ref="chartStageElement"
           class="chart-stage chart-poster new-ui-chart-stage"

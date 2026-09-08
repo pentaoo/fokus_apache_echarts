@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
+const props = withDefaults(defineProps<{
+  active?: boolean
+}>(), {
+  active: false,
+})
 
 type ResizeDirection = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
 type GestureMode = 'move' | 'resize'
@@ -115,7 +121,7 @@ function startGesture(
   mode: GestureMode,
   direction?: ResizeDirection,
 ) {
-  if (event.button !== 0 || activeGesture) return
+  if (!props.active || event.button !== 0 || activeGesture) return
   event.preventDefault()
   event.stopPropagation()
 
@@ -187,6 +193,7 @@ function finishGesture(event: PointerEvent) {
 }
 
 function resizeWithKeyboard(direction: ResizeDirection, event: KeyboardEvent) {
+  if (!props.active) return
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
   event.preventDefault()
   event.stopPropagation()
@@ -208,6 +215,7 @@ function resizeWithKeyboard(direction: ResizeDirection, event: KeyboardEvent) {
 }
 
 function moveWithKeyboard(event: KeyboardEvent) {
+  if (!props.active) return
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
   event.preventDefault()
   const step = event.shiftKey ? 16 : 4
@@ -238,10 +246,18 @@ function resetRect(event?: Event) {
 
 function stopGlobalListeners() {
   activeGesture = null
+  isManipulating.value = false
   window.removeEventListener('pointermove', updateGesture)
   window.removeEventListener('pointerup', finishGesture)
   window.removeEventListener('pointercancel', finishGesture)
 }
+
+watch(
+  () => props.active,
+  (active) => {
+    if (!active) stopGlobalListeners()
+  },
+)
 
 onMounted(() => {
   if (!canvasElement.value) return
@@ -265,11 +281,16 @@ onBeforeUnmount(() => {
   <div ref="canvasElement" class="chart-object-canvas">
     <div
       class="chart-object"
-      :class="{ 'is-manipulating': isManipulating }"
+      :class="{
+        'is-active': active,
+        'is-manipulating': isManipulating,
+      }"
       :style="objectStyle"
       role="group"
-      tabindex="0"
-      aria-label="График. Перетаскивайте объект или используйте стрелки для перемещения"
+      :tabindex="active ? 0 : -1"
+      :aria-label="active
+        ? 'График. Перетаскивайте объект или используйте стрелки для перемещения'
+        : 'График'"
       @pointerdown="startGesture($event, 'move')"
       @keydown="moveWithKeyboard"
     >
@@ -279,6 +300,7 @@ onBeforeUnmount(() => {
 
       <button
         v-for="handle in handles"
+        v-if="active"
         :key="handle.direction"
         type="button"
         class="chart-resize-handle"
@@ -289,7 +311,11 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div class="chart-object-readout" :class="{ 'is-active': isManipulating }">
+    <div
+      v-if="active"
+      class="chart-object-readout"
+      :class="{ 'is-active': isManipulating }"
+    >
       <output>{{ pixelSize.width }} × {{ pixelSize.height }}</output>
       <button type="button" aria-label="Вернуть исходный размер графика" @click="resetRect">
         Сбросить
@@ -313,11 +339,15 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   outline: none;
+  cursor: default;
+}
+
+.chart-object.is-active {
   cursor: move;
   touch-action: none;
 }
 
-.chart-object::after {
+.chart-object.is-active::after {
   position: absolute;
   z-index: 2;
   inset: 0;
@@ -326,7 +356,7 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.chart-object:focus-visible::after {
+.chart-object.is-active:focus-visible::after {
   box-shadow: 0 0 0 3px rgb(85 0 235 / 24%);
 }
 
@@ -334,6 +364,9 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.chart-object.is-active .chart-object-content {
   pointer-events: none;
 }
 

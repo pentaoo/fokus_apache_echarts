@@ -43,6 +43,7 @@ import orderRandomIcon from '../assets/new-ui/order-random.svg'
 import orderReversedIcon from '../assets/new-ui/order-reversed.svg'
 import pieIcon from '../assets/new-ui/pie.svg'
 import rowsIcon from '../assets/new-ui/rows.svg'
+import transformChartIcon from '../assets/new-ui/transform-chart.svg'
 
 interface PanelSeries {
   id: number
@@ -60,6 +61,7 @@ const props = defineProps<{
   pieWarnings: string[]
   pieMaximumRadiusPx: number
   barWidthMinimum: number
+  transformMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -73,6 +75,7 @@ const emit = defineEmits<{
   'add-palette-color': []
   'randomize': []
   'clear': []
+  'toggle-transform-mode': []
   close: []
 }>()
 
@@ -523,15 +526,28 @@ function setPieNames(show: boolean) {
   <section class="new-design-panel" aria-labelledby="new-design-title">
     <header class="new-design-heading">
       <h2 id="new-design-title">График</h2>
-      <button
-        class="new-design-clear"
-        type="button"
-        aria-label="Закрыть настройки графика"
-        title="Закрыть настройки графика"
-        @click="emit('close')"
-      >
-        <img :src="clearIcon" alt="" />
-      </button>
+      <div class="new-design-heading-actions">
+        <button
+          class="new-design-transform"
+          :class="{ active: transformMode }"
+          type="button"
+          :aria-pressed="Boolean(transformMode)"
+          aria-label="Изменить размер и положение графика"
+          title="Изменить размер и положение графика"
+          @click="emit('toggle-transform-mode')"
+        >
+          <img :src="transformChartIcon" alt="" />
+        </button>
+        <button
+          class="new-design-clear"
+          type="button"
+          aria-label="Закрыть настройки графика"
+          title="Закрыть настройки графика"
+          @click="emit('close')"
+        >
+          <img :src="clearIcon" alt="" />
+        </button>
+      </div>
     </header>
 
     <div class="new-design-title-field">
@@ -1392,7 +1408,14 @@ input:focus-visible {
   letter-spacing: -1.5px;
 }
 
+.new-design-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .new-design-clear,
+.new-design-transform,
 .new-design-random {
   display: grid;
   min-width: 0;
@@ -1403,23 +1426,54 @@ input:focus-visible {
   background: transparent;
 }
 
-.new-design-clear {
+.new-design-clear,
+.new-design-transform {
   width: 32px;
   height: 32px;
+  border-radius: 50%;
   font-size: 30px;
   font-weight: 300;
   line-height: 1;
 }
 
-.new-design-clear img {
+.new-design-clear img,
+.new-design-transform img {
   width: 18px;
   height: 18px;
+}
+
+.new-design-transform {
+  transition:
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.new-design-transform:hover {
+  background: #e9e2ff;
+}
+
+.new-design-transform.active {
+  background: var(--new-ui-accent);
+}
+
+.new-design-transform.active img {
+  filter: brightness(0) invert(1);
+}
+
+.new-design-transform:active {
+  transform: scale(0.94);
 }
 
 .new-design-clear:hover,
 .new-design-random:hover {
   color: var(--new-ui-accent);
   background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-design-transform {
+    transition: none;
+  }
 }
 
 .new-design-title-field {
