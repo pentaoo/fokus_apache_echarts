@@ -18,6 +18,7 @@ import {
   TooltipComponent,
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import ResizableChartObject from './components/ResizableChartObject.vue'
 import ChartDataEditor from './components/ChartDataEditor.vue'
 import HexColorInput from './components/HexColorInput.vue'
 import NewDesignPanel from './components/NewDesignPanel.vue'
@@ -1796,6 +1797,29 @@ const newUiChartScale = computed(() => {
   return Math.min(1.35, Math.max(0.4, scale || 1))
 })
 
+const newUiResponsiveLayout = computed(() => {
+  const width = Math.max(1, chartStageSize.value.width)
+  const height = Math.max(1, chartStageSize.value.height)
+  const categoryCount = Math.max(1, categories.value.length)
+
+  return {
+    showLegend: width >= 360 && height >= 220,
+    showTitle: width >= 220 && height >= 140,
+    showValueLabels: width >= 300 && height >= 190,
+    showAxisLabels: width >= 170 && height >= 110,
+    showPieLabels: width >= 230 && height >= 150,
+    showPiePercentages: width >= 300 && height >= 190,
+    horizontalCategoryInterval: Math.max(
+      0,
+      Math.ceil((categoryCount * 64) / width) - 1,
+    ),
+    verticalCategoryInterval: Math.max(
+      0,
+      Math.ceil((categoryCount * 26) / height) - 1,
+    ),
+  }
+})
+
 const newUiTitleLayout = computed(() => {
   const scale = newUiChartScale.value
   const fontSize = Math.round(24 * scale)
@@ -1883,9 +1907,12 @@ const barWidthMinimum = computed(() => {
   const categoryLabelInside =
     horizontal &&
     settings.showYAxisLabels &&
+    newUiResponsiveLayout.value.showAxisLabels &&
     settings.barCategoryPosition === 'inside'
   const valueLabelInside =
-    settings.showValueLabels && settings.barValuePosition === 'inside'
+    settings.showValueLabels &&
+    newUiResponsiveLayout.value.showValueLabels &&
+    settings.barValuePosition === 'inside'
 
   if (!categoryLabelInside && !valueLabelInside) return 0
 
@@ -2008,6 +2035,21 @@ watch(
 
 const newUiOption = computed<ChartOption>(() => {
   const settingsSnapshot = JSON.parse(styleRevision.value) as StyleSettings
+  const responsiveLayout = newUiResponsiveLayout.value
+  settingsSnapshot.showLegend =
+    settingsSnapshot.showLegend && responsiveLayout.showLegend
+  settingsSnapshot.showTitle =
+    settingsSnapshot.showTitle && responsiveLayout.showTitle
+  settingsSnapshot.showValueLabels =
+    settingsSnapshot.showValueLabels && responsiveLayout.showValueLabels
+  settingsSnapshot.showXAxisLabels =
+    settingsSnapshot.showXAxisLabels && responsiveLayout.showAxisLabels
+  settingsSnapshot.showYAxisLabels =
+    settingsSnapshot.showYAxisLabels && responsiveLayout.showAxisLabels
+  settingsSnapshot.showPieLabels =
+    settingsSnapshot.showPieLabels && responsiveLayout.showPieLabels
+  settingsSnapshot.showPiePercentages =
+    settingsSnapshot.showPiePercentages && responsiveLayout.showPiePercentages
   const scale = newUiChartScale.value
   const safeContentInset = Math.max(8, Math.round(12 * scale))
   const kind = activeNewUiChartKind()
@@ -2176,6 +2218,28 @@ const newUiOption = computed<ChartOption>(() => {
     barWidth: 0,
     barMaxWidth: 0,
   })
+
+  if (kind === 'columns' || kind === 'rows' || kind === 'line') {
+    const categoryAxisKey = kind === 'rows' ? 'yAxis' : 'xAxis'
+    const categoryAxisSource = styled[categoryAxisKey]
+    const interval = kind === 'rows'
+      ? responsiveLayout.verticalCategoryInterval
+      : responsiveLayout.horizontalCategoryInterval
+    const categoryAxes = (
+      Array.isArray(categoryAxisSource)
+        ? categoryAxisSource
+        : [categoryAxisSource]
+    ).map((axis) => ({
+      ...(axis ?? {}),
+      axisLabel: {
+        ...(axis?.axisLabel ?? {}),
+        interval,
+      },
+    }))
+    styled[categoryAxisKey] = Array.isArray(categoryAxisSource)
+      ? categoryAxes
+      : categoryAxes[0]
+  }
 
   if (kind === 'columns' || kind === 'rows') {
     const valueAxisKey = kind === 'rows' ? 'xAxis' : 'yAxis'
@@ -2499,21 +2563,23 @@ async function copyOption() {
     </template>
 
     <template #chart>
-      <div
-        ref="chartStageElement"
-        class="chart-stage chart-poster new-ui-chart-stage"
-        :style="newUiChartStageStyle"
-      >
-        <VChart
-          :key="`new-${activeNewUiChartKind()}-${renderer}-${chartTheme}-${styleMode}`"
-          class="chart"
-          :option="newUiOption"
-          :init-options="{ renderer }"
-          :update-options="{ notMerge: true }"
-          :theme="chartTheme === 'dark' ? 'dark' : undefined"
-          :autoresize="{ throttle: 100 }"
-        />
-      </div>
+      <ResizableChartObject>
+        <div
+          ref="chartStageElement"
+          class="chart-stage chart-poster new-ui-chart-stage"
+          :style="newUiChartStageStyle"
+        >
+          <VChart
+            :key="`new-${activeNewUiChartKind()}-${renderer}-${chartTheme}-${styleMode}`"
+            class="chart"
+            :option="newUiOption"
+            :init-options="{ renderer }"
+            :update-options="{ notMerge: true }"
+            :theme="chartTheme === 'dark' ? 'dark' : undefined"
+            :autoresize="{ throttle: 100 }"
+          />
+        </div>
+      </ResizableChartObject>
     </template>
 
   </NewUiAppShell>

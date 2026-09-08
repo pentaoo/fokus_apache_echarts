@@ -320,7 +320,6 @@ const slideDots = Array.from({ length: 10 }, (_, index) => index)
   max-width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  padding: 24px;
   border-radius: 16px;
   background: #fff;
   pointer-events: auto;
