@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import AnimatedSegments from './AnimatedSegments.vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import FigmaColorInput from './FigmaColorInput.vue'
 import FigmaPercentInput from './FigmaPercentInput.vue'
 import { generateMonochromePalette } from '../colorPalette'
@@ -23,12 +24,12 @@ import {
   MIN_LINE_WIDTH_PX,
   MIN_PIE_RING_THICKNESS_PX,
 } from '../chartStyle'
-import { PALETTE_LIBRARY } from '../paletteCatalog/paletteLibrary'
-import type {
-  CatalogPaletteId,
-  ChartType,
-  PaletteSelectionId,
-} from '../stylePresets'
+import type { ChartType, PaletteSelectionId } from '../stylePresets'
+import {
+  NEW_UI_PALETTE_CHOICES,
+  type NewUiPaletteGroup,
+  type NewUiPaletteChoice,
+} from '../newUiPalettes'
 import alignCenterIcon from '../assets/new-ui/align-center.svg'
 import alignLeftIcon from '../assets/new-ui/align-left.svg'
 import alignRightIcon from '../assets/new-ui/align-right.svg'
@@ -42,12 +43,6 @@ import orderRandomIcon from '../assets/new-ui/order-random.svg'
 import orderReversedIcon from '../assets/new-ui/order-reversed.svg'
 import pieIcon from '../assets/new-ui/pie.svg'
 import rowsIcon from '../assets/new-ui/rows.svg'
-
-interface PaletteChoice {
-  id: Exclude<PaletteSelectionId, 'custom'>
-  name: string
-  colors: string[]
-}
 
 interface PanelSeries {
   id: number
@@ -72,74 +67,19 @@ const emit = defineEmits<{
   'select-chart-type': [value: ChartType]
   'select-columns-bar': []
   'select-horizontal-bar': []
-  'apply-palette': [id: PaletteChoice['id'], colors: string[]]
+  'apply-palette': [id: NewUiPaletteChoice['id'], colors: string[]]
   'update:mono-base-color': [value: string]
   'mark-palette-custom': []
   'add-palette-color': []
-  'randomize-palette': []
   'randomize': []
   'clear': []
   close: []
 }>()
 
-const featuredPaletteChoices: PaletteChoice[] = [
-  {
-    id: 'mono',
-    name: 'Одноцветная',
-    colors: ['#f4f1ff', '#d8ccff', '#b5a0ff', '#8e6dff', '#6a38f0'],
-  },
-  {
-    id: 'fokus',
-    name: 'Яркая',
-    colors: ['#7559ff', '#00b587', '#ffc548', '#f23f3a', '#fe76b4'],
-  },
-  {
-    id: 'chalk',
-    name: 'Мелки',
-    colors: ['#71c1e3', '#82bb89', '#f9ea6e', '#f9b77d', '#fca4b5'],
-  },
-  {
-    id: 'warm',
-    name: 'Закат',
-    colors: ['#3a0ca3', '#7308b8', '#f72586', '#f97f02', '#ffba0a'],
-  },
-  {
-    id: 'contrast',
-    name: 'Контрастная',
-    colors: ['#101010', '#5500eb', '#00b587', '#ffc548', '#f23f3a'],
-  },
-]
-
-const retainedCatalogPaletteIds = [
-  'L02',
-  'L06',
-  'L10',
-  'L11',
-  'L13',
-  'D01',
-  'D02',
-  'D04',
-  'D05',
-  'D18',
-] as const
-
-const retainedCatalogPaletteChoices: PaletteChoice[] =
-  retainedCatalogPaletteIds.map((paletteId) => {
-    const palette = PALETTE_LIBRARY.find((item) => item.id === paletteId)
-    if (!palette) throw new Error(`Palette ${paletteId} is missing`)
-
-    return {
-    id: `catalog-${palette.id}` as CatalogPaletteId,
-    name: `${palette.id} ${palette.name}`,
-    colors: palette.colors,
-    }
-  })
-
-const paletteRows: PaletteChoice[][] = [
-  featuredPaletteChoices,
-  retainedCatalogPaletteChoices.slice(0, 5),
-  retainedCatalogPaletteChoices.slice(5, 10),
-]
+const paletteGroupOrder: NewUiPaletteGroup[] = ['bright', 'dark', 'pastel']
+const paletteRows: NewUiPaletteChoice[][] = paletteGroupOrder.map((group) =>
+  NEW_UI_PALETTE_CHOICES.filter((choice) => choice.group === group),
+)
 
 const typeChoices: Array<{
   id: 'columns' | 'rows' | 'doughnut' | 'pie' | 'line'
@@ -243,6 +183,7 @@ const monochromePreview = computed(() =>
 )
 
 const presetDragging = ref(false)
+const paletteSectionElement = ref<HTMLElement | null>(null)
 const openPaletteIndex = ref<number | null>(null)
 let presetDragElement: HTMLElement | null = null
 let presetPointerId: number | null = null
@@ -253,12 +194,81 @@ let presetLastX = 0
 let presetLastTime = 0
 let presetVelocity = 0
 let presetInertiaFrame = 0
+let presetRevealFrame = 0
 
 function stopPresetInertia() {
   if (!presetInertiaFrame) return
   window.cancelAnimationFrame(presetInertiaFrame)
   presetInertiaFrame = 0
 }
+
+function stopPresetReveal() {
+  if (!presetRevealFrame) return
+  window.cancelAnimationFrame(presetRevealFrame)
+  presetRevealFrame = 0
+}
+
+function revealSelectedPalette() {
+  stopPresetInertia()
+  stopPresetReveal()
+  const selected = paletteSectionElement.value?.querySelector<HTMLElement>(
+    '.new-design-preset.active',
+  )
+  const scroll = selected?.closest<HTMLElement>('.new-design-preset-scroll')
+  if (!selected || !scroll) return
+
+  const scrollRect = scroll.getBoundingClientRect()
+  const selectedRect = selected.getBoundingClientRect()
+  const edgeInset = 4
+  let targetScrollLeft = scroll.scrollLeft
+
+  if (selectedRect.left < scrollRect.left + edgeInset) {
+    targetScrollLeft -= scrollRect.left + edgeInset - selectedRect.left
+  } else if (selectedRect.right > scrollRect.right - edgeInset) {
+    targetScrollLeft += selectedRect.right - (scrollRect.right - edgeInset)
+  } else {
+    return
+  }
+
+  targetScrollLeft = Math.min(
+    scroll.scrollWidth - scroll.clientWidth,
+    Math.max(0, targetScrollLeft),
+  )
+  const startScrollLeft = scroll.scrollLeft
+  const distance = targetScrollLeft - startScrollLeft
+  if (Math.abs(distance) < 1) return
+
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    scroll.scrollLeft = targetScrollLeft
+    return
+  }
+
+  const duration = Math.min(680, Math.max(360, Math.abs(distance) * 1.2))
+  const startTime = performance.now()
+  const animate = (currentTime: number) => {
+    const progress = Math.min(1, (currentTime - startTime) / duration)
+    const easedProgress = 1 - Math.pow(1 - progress, 4)
+    scroll.scrollLeft = startScrollLeft + distance * easedProgress
+    if (progress >= 1) {
+      presetRevealFrame = 0
+      return
+    }
+    presetRevealFrame = window.requestAnimationFrame(animate)
+  }
+  presetRevealFrame = window.requestAnimationFrame(animate)
+}
+
+watch(
+  () => props.selectedPaletteId,
+  async (selectedPaletteId, previousPaletteId) => {
+    if (
+      selectedPaletteId === 'custom' ||
+      selectedPaletteId === previousPaletteId
+    ) return
+    await nextTick()
+    revealSelectedPalette()
+  },
+)
 
 function startPresetInertia() {
   const scroll = presetDragElement
@@ -289,6 +299,7 @@ function startPresetDrag(event: PointerEvent) {
   const scroll = event.currentTarget as HTMLElement | null
   if (!scroll) return
   stopPresetInertia()
+  stopPresetReveal()
   presetDragElement = scroll
   presetPointerId = event.pointerId
   presetDragStartX = event.clientX
@@ -346,7 +357,10 @@ function preventPresetClick(event: MouseEvent) {
   presetDidDrag = false
 }
 
-onBeforeUnmount(stopPresetInertia)
+onBeforeUnmount(() => {
+  stopPresetInertia()
+  stopPresetReveal()
+})
 
 function selectType(id: (typeof typeChoices)[number]['id']) {
   if (id === 'rows') {
@@ -360,11 +374,19 @@ function selectType(id: (typeof typeChoices)[number]['id']) {
   emit('select-chart-type', id)
 }
 
-function setPalette(choice: PaletteChoice) {
+function setPalette(choice: NewUiPaletteChoice) {
   emit('apply-palette', choice.id, choice.colors)
 }
 
-function palettePreview(choice: PaletteChoice) {
+function selectRandomPalette() {
+  const choices = NEW_UI_PALETTE_CHOICES.filter(
+    (choice) => choice.id !== props.selectedPaletteId,
+  )
+  const choice = choices[Math.floor(Math.random() * choices.length)]
+  if (choice) setPalette(choice)
+}
+
+function palettePreview(choice: NewUiPaletteChoice) {
   return choice.id === 'mono'
     ? monochromePreview.value.slice(0, 5)
     : choice.colors.slice(0, 5)
@@ -559,7 +581,10 @@ function setPieNames(show: boolean) {
     </section>
 
     <div class="new-design-settings">
-      <section class="new-design-section colors-section">
+      <section
+        ref="paletteSectionElement"
+        class="new-design-section colors-section"
+      >
         <div class="new-design-section-heading">
           <h3>Палитра</h3>
           <button
@@ -567,7 +592,7 @@ function setPieNames(show: boolean) {
             type="button"
             aria-label="Случайная палитра"
             title="Случайная палитра"
-            @click="emit('randomize-palette')"
+            @click="selectRandomPalette"
           >
             Случайная
           </button>
@@ -766,66 +791,66 @@ function setPieNames(show: boolean) {
             />
             <i aria-hidden="true" />
           </label>
-          <Transition name="new-design-disclosure">
-            <div
-              v-if="settings.showLines"
-              id="new-design-line-details"
-              class="new-design-disclosure"
-            >
-              <div class="new-design-disclosure-content">
-                <div class="new-design-range-row">
-                  <span>Толщина</span>
-                  <input
-                    :value="settings.lineWidth"
-                    type="range"
-                    :min="MIN_LINE_WIDTH_PX"
-                    :max="MAX_LINE_WIDTH_PX"
-                    step="0.5"
-                    aria-label="Толщина линий"
-                    :style="rangeStyle(settings.lineWidth, MIN_LINE_WIDTH_PX, MAX_LINE_WIDTH_PX)"
-                    @input="settings.lineWidth = Number(($event.target as HTMLInputElement).value)"
-                  />
-                  <FigmaPercentInput
-                    :model-value="Math.round(((settings.lineWidth - MIN_LINE_WIDTH_PX) / (MAX_LINE_WIDTH_PX - MIN_LINE_WIDTH_PX)) * 100)"
-                    label="Толщина линий"
-                    @update:model-value="updateLineWidth"
-                  />
-                </div>
-                <div class="new-design-control-row">
-                  <span>Форма</span>
-                  <div class="new-design-text-tabs three">
-                    <button
-                      v-for="choice in [
-                        { value: 'straight', label: 'Резкая' },
-                        { value: 'smooth', label: 'Плавная' },
-                        { value: 'step', label: 'Ступени' },
-                      ]"
-                      :key="choice.value"
-                      type="button"
-                      :class="{ active: settings.lineShape === choice.value }"
-                      @click="setLineShape(choice.value as LineShape)"
-                    >{{ choice.label }}</button>
-                  </div>
-                </div>
-                <div class="new-design-control-row">
-                  <span>Начертание</span>
-                  <div class="new-design-text-tabs three">
-                    <button
-                      v-for="choice in [
-                        { value: 'solid', label: 'Обычная' },
-                        { value: 'dashed', label: 'Штрихи' },
-                        { value: 'dotted', label: 'Точки' },
-                      ]"
-                      :key="choice.value"
-                      type="button"
-                      :class="{ active: settings.lineType === choice.value }"
-                      @click="settings.lineType = choice.value as LineStyleType"
-                    >{{ choice.label }}</button>
-                  </div>
-                </div>
+          <div
+            :class="{ 'is-open': settings.showLines }"
+            :inert="!(settings.showLines)"
+            :aria-hidden="!(settings.showLines)"
+            id="new-design-line-details"
+            class="new-design-disclosure"
+          >
+            <div class="new-design-disclosure-content">
+              <div class="new-design-range-row">
+                <span>Толщина</span>
+                <input
+                  :value="settings.lineWidth"
+                  type="range"
+                  :min="MIN_LINE_WIDTH_PX"
+                  :max="MAX_LINE_WIDTH_PX"
+                  step="0.5"
+                  aria-label="Толщина линий"
+                  :style="rangeStyle(settings.lineWidth, MIN_LINE_WIDTH_PX, MAX_LINE_WIDTH_PX)"
+                  @input="settings.lineWidth = Number(($event.target as HTMLInputElement).value)"
+                />
+                <FigmaPercentInput
+                  :model-value="Math.round(((settings.lineWidth - MIN_LINE_WIDTH_PX) / (MAX_LINE_WIDTH_PX - MIN_LINE_WIDTH_PX)) * 100)"
+                  label="Толщина линий"
+                  @update:model-value="updateLineWidth"
+                />
+              </div>
+              <div class="new-design-control-row">
+                <span>Форма</span>
+                <AnimatedSegments class="new-design-text-tabs three">
+                  <button
+                    v-for="choice in [
+                      { value: 'straight', label: 'Резкая' },
+                      { value: 'smooth', label: 'Плавная' },
+                      { value: 'step', label: 'Ступени' },
+                    ]"
+                    :key="choice.value"
+                    type="button"
+                    :class="{ active: settings.lineShape === choice.value }"
+                    @click="setLineShape(choice.value as LineShape)"
+                  >{{ choice.label }}</button>
+                </AnimatedSegments>
+              </div>
+              <div class="new-design-control-row">
+                <span>Начертание</span>
+                <AnimatedSegments class="new-design-text-tabs three">
+                  <button
+                    v-for="choice in [
+                      { value: 'solid', label: 'Обычная' },
+                      { value: 'dashed', label: 'Штрихи' },
+                      { value: 'dotted', label: 'Точки' },
+                    ]"
+                    :key="choice.value"
+                    type="button"
+                    :class="{ active: settings.lineType === choice.value }"
+                    @click="settings.lineType = choice.value as LineStyleType"
+                  >{{ choice.label }}</button>
+                </AnimatedSegments>
               </div>
             </div>
-          </Transition>
+          </div>
           <label class="new-design-switch-row">
             <span>Показывать точки</span>
             <input
@@ -838,33 +863,33 @@ function setPieNames(show: boolean) {
             />
             <i aria-hidden="true" />
           </label>
-          <Transition name="new-design-disclosure">
-            <div
-              v-if="settings.showLineSymbols"
-              id="new-design-point-details"
-              class="new-design-disclosure"
-            >
-              <div class="new-design-disclosure-content">
-                <div class="new-design-range-row">
-                  <span>Размер точек</span>
-                  <input
-                    :value="settings.lineSymbolSize"
-                    type="range"
-                    min="2"
-                    :max="MAX_LINE_WIDTH_PX"
-                    aria-label="Размер точек"
-                    :style="rangeStyle(settings.lineSymbolSize, 2, MAX_LINE_WIDTH_PX)"
-                    @input="settings.lineSymbolSize = Number(($event.target as HTMLInputElement).value)"
-                  />
-                  <FigmaPercentInput
-                    :model-value="Math.round(((settings.lineSymbolSize - 2) / (MAX_LINE_WIDTH_PX - 2)) * 100)"
-                    label="Размер точек"
-                    @update:model-value="updateLinePointSize"
-                  />
-                </div>
+          <div
+            :class="{ 'is-open': settings.showLineSymbols }"
+            :inert="!(settings.showLineSymbols)"
+            :aria-hidden="!(settings.showLineSymbols)"
+            id="new-design-point-details"
+            class="new-design-disclosure"
+          >
+            <div class="new-design-disclosure-content">
+              <div class="new-design-range-row">
+                <span>Размер точек</span>
+                <input
+                  :value="settings.lineSymbolSize"
+                  type="range"
+                  min="2"
+                  :max="MAX_LINE_WIDTH_PX"
+                  aria-label="Размер точек"
+                  :style="rangeStyle(settings.lineSymbolSize, 2, MAX_LINE_WIDTH_PX)"
+                  @input="settings.lineSymbolSize = Number(($event.target as HTMLInputElement).value)"
+                />
+                <FigmaPercentInput
+                  :model-value="Math.round(((settings.lineSymbolSize - 2) / (MAX_LINE_WIDTH_PX - 2)) * 100)"
+                  label="Размер точек"
+                  @update:model-value="updateLinePointSize"
+                />
               </div>
             </div>
-          </Transition>
+          </div>
           <label
             class="new-design-switch-row"
             :class="{ last: !settings.showLineArea }"
@@ -879,31 +904,31 @@ function setPieNames(show: boolean) {
             />
             <i aria-hidden="true" />
           </label>
-          <Transition name="new-design-disclosure">
-            <div
-              v-if="settings.showLineArea"
-              id="new-design-line-area-details"
-              class="new-design-disclosure"
-            >
-              <div class="new-design-disclosure-content">
-                <div class="new-design-range-row last">
-                  <span>Прозрачность заливки</span>
-                  <input
-                    v-model.number="settings.areaOpacity"
-                    type="range"
-                    min="0"
-                    max="100"
-                    aria-label="Прозрачность заливки"
-                    :style="rangeStyle(settings.areaOpacity, 0, 100)"
-                  />
-                  <FigmaPercentInput
-                    v-model="settings.areaOpacity"
-                    label="Прозрачность заливки"
-                  />
-                </div>
+          <div
+            :class="{ 'is-open': settings.showLineArea }"
+            :inert="!(settings.showLineArea)"
+            :aria-hidden="!(settings.showLineArea)"
+            id="new-design-line-area-details"
+            class="new-design-disclosure"
+          >
+            <div class="new-design-disclosure-content">
+              <div class="new-design-range-row last">
+                <span>Прозрачность заливки</span>
+                <input
+                  v-model.number="settings.areaOpacity"
+                  type="range"
+                  min="0"
+                  max="100"
+                  aria-label="Прозрачность заливки"
+                  :style="rangeStyle(settings.areaOpacity, 0, 100)"
+                />
+                <FigmaPercentInput
+                  v-model="settings.areaOpacity"
+                  label="Прозрачность заливки"
+                />
               </div>
             </div>
-          </Transition>
+          </div>
         </div>
       </section>
 
@@ -944,7 +969,7 @@ function setPieNames(show: boolean) {
           </div>
           <div class="new-design-control-row">
             <span>Порядок колонок</span>
-            <div class="new-design-icon-tabs" aria-label="Порядок колонок">
+            <AnimatedSegments class="new-design-icon-tabs" aria-label="Порядок колонок">
               <button
                 v-for="choice in [
                   { value: 'normal', icon: columnsIcon, label: 'От меньшей к большей' },
@@ -960,11 +985,11 @@ function setPieNames(show: boolean) {
               >
                 <img :src="choice.icon" alt="" />
               </button>
-            </div>
+            </AnimatedSegments>
           </div>
           <div class="new-design-control-row last">
             <span>Расположение</span>
-            <div class="new-design-text-tabs">
+            <AnimatedSegments class="new-design-text-tabs">
               <button
                 type="button"
                 :class="{ active: settings.barArrangement !== 'stacked' }"
@@ -975,7 +1000,7 @@ function setPieNames(show: boolean) {
                 :class="{ active: settings.barArrangement === 'stacked' }"
                 @click="settings.barArrangement = 'stacked'"
               >Стопкой</button>
-            </div>
+            </AnimatedSegments>
           </div>
         </div>
       </section>
@@ -1019,32 +1044,32 @@ function setPieNames(show: boolean) {
             />
             <i aria-hidden="true" />
           </label>
-          <Transition name="new-design-disclosure">
-            <div
-              v-if="axisElementsVisible"
-              id="new-design-axis-opacity-details"
-              class="new-design-disclosure"
-            >
-              <div class="new-design-disclosure-content">
-                <label class="new-design-range-row last">
-                  <span>Прозрачность</span>
-                  <input
-                    v-model.number="settings.axisOpacity"
-                    type="range"
-                    min="0"
-                    max="100"
-                    aria-label="Прозрачность линий осей, засечек и сетки"
-                    :style="rangeStyle(settings.axisOpacity, 0, 100)"
-                  />
-                  <FigmaPercentInput
-                    :model-value="settings.axisOpacity"
-                    label="Прозрачность линий осей, засечек и сетки в процентах"
-                    @update:model-value="settings.axisOpacity = $event"
-                  />
-                </label>
-              </div>
+          <div
+            :class="{ 'is-open': axisElementsVisible }"
+            :inert="!(axisElementsVisible)"
+            :aria-hidden="!(axisElementsVisible)"
+            id="new-design-axis-opacity-details"
+            class="new-design-disclosure"
+          >
+            <div class="new-design-disclosure-content">
+              <label class="new-design-range-row last">
+                <span>Прозрачность</span>
+                <input
+                  v-model.number="settings.axisOpacity"
+                  type="range"
+                  min="0"
+                  max="100"
+                  aria-label="Прозрачность линий осей, засечек и сетки"
+                  :style="rangeStyle(settings.axisOpacity, 0, 100)"
+                />
+                <FigmaPercentInput
+                  :model-value="settings.axisOpacity"
+                  label="Прозрачность линий осей, засечек и сетки в процентах"
+                  @update:model-value="settings.axisOpacity = $event"
+                />
+              </label>
             </div>
-          </Transition>
+          </div>
         </div>
       </section>
 
@@ -1062,39 +1087,39 @@ function setPieNames(show: boolean) {
             />
             <i aria-hidden="true" />
           </label>
-          <Transition name="new-design-disclosure">
-            <div
-              v-if="settings.showTitle"
-              id="new-design-title-details"
-              class="new-design-disclosure"
-            >
-              <div class="new-design-disclosure-content">
-                <div class="new-design-control-row">
-                  <span>Положение заголовка</span>
-                  <div
-                    class="new-design-icon-tabs"
-                    aria-label="Положение заголовка"
+          <div
+            :class="{ 'is-open': settings.showTitle }"
+            :inert="!(settings.showTitle)"
+            :aria-hidden="!(settings.showTitle)"
+            id="new-design-title-details"
+            class="new-design-disclosure"
+          >
+            <div class="new-design-disclosure-content">
+              <div class="new-design-control-row">
+                <span>Положение заголовка</span>
+                <AnimatedSegments
+                  class="new-design-icon-tabs"
+                  aria-label="Положение заголовка"
+                >
+                  <button
+                    v-for="choice in [
+                      { value: 'left', icon: alignLeftIcon, label: 'По левому краю' },
+                      { value: 'center', icon: alignCenterIcon, label: 'По центру' },
+                      { value: 'right', icon: alignRightIcon, label: 'По правому краю' },
+                    ]"
+                    :key="choice.value"
+                    type="button"
+                    :class="[`align-${choice.value}`, { active: settings.titleAlignment === choice.value }]"
+                    :aria-label="choice.label"
+                    :aria-pressed="settings.titleAlignment === choice.value"
+                    @click="settings.titleAlignment = choice.value as LabelAlignment"
                   >
-                    <button
-                      v-for="choice in [
-                        { value: 'left', icon: alignLeftIcon, label: 'По левому краю' },
-                        { value: 'center', icon: alignCenterIcon, label: 'По центру' },
-                        { value: 'right', icon: alignRightIcon, label: 'По правому краю' },
-                      ]"
-                      :key="choice.value"
-                      type="button"
-                      :class="[`align-${choice.value}`, { active: settings.titleAlignment === choice.value }]"
-                      :aria-label="choice.label"
-                      :aria-pressed="settings.titleAlignment === choice.value"
-                      @click="settings.titleAlignment = choice.value as LabelAlignment"
-                    >
-                      <img :src="choice.icon" alt="" />
-                    </button>
-                  </div>
-                </div>
+                    <img :src="choice.icon" alt="" />
+                  </button>
+                </AnimatedSegments>
               </div>
             </div>
-          </Transition>
+          </div>
           <template v-if="circular">
             <label class="new-design-switch-row">
               <span>Названия секторов</span>
@@ -1108,39 +1133,39 @@ function setPieNames(show: boolean) {
               />
               <i aria-hidden="true" />
             </label>
-            <Transition name="new-design-disclosure">
-              <div
-                v-if="settings.showPieLabels"
-                id="new-design-pie-label-details"
-                class="new-design-disclosure"
-              >
-                <div class="new-design-disclosure-content">
-                  <label class="new-design-switch-row">
-                    <span>Линии к названиям</span>
-                    <input v-model="settings.showPieLabelLines" type="checkbox" />
-                    <i aria-hidden="true" />
-                  </label>
-                  <div class="new-design-range-row">
-                    <span>Размер названий</span>
-                    <input
-                      :value="settings.pieLabelSize"
-                      type="range"
-                      min="10"
-                      max="48"
-                      step="0.5"
-                      aria-label="Размер названий секторов"
-                      :style="rangeStyle(settings.pieLabelSize, 10, 48)"
-                      @input="settings.pieLabelSize = Number(($event.target as HTMLInputElement).value)"
-                    />
-                    <FigmaPercentInput
-                      :model-value="Math.round(((settings.pieLabelSize - 10) / 38) * 100)"
-                      label="Размер названий секторов"
-                      @update:model-value="updatePieLabelSize"
-                    />
-                  </div>
+            <div
+            :class="{ 'is-open': settings.showPieLabels }"
+            :inert="!(settings.showPieLabels)"
+            :aria-hidden="!(settings.showPieLabels)"
+              id="new-design-pie-label-details"
+              class="new-design-disclosure"
+            >
+              <div class="new-design-disclosure-content">
+                <label class="new-design-switch-row">
+                  <span>Линии к названиям</span>
+                  <input v-model="settings.showPieLabelLines" type="checkbox" />
+                  <i aria-hidden="true" />
+                </label>
+                <div class="new-design-range-row">
+                  <span>Размер названий</span>
+                  <input
+                    :value="settings.pieLabelSize"
+                    type="range"
+                    min="10"
+                    max="48"
+                    step="0.5"
+                    aria-label="Размер названий секторов"
+                    :style="rangeStyle(settings.pieLabelSize, 10, 48)"
+                    @input="settings.pieLabelSize = Number(($event.target as HTMLInputElement).value)"
+                  />
+                  <FigmaPercentInput
+                    :model-value="Math.round(((settings.pieLabelSize - 10) / 38) * 100)"
+                    label="Размер названий секторов"
+                    @update:model-value="updatePieLabelSize"
+                  />
                 </div>
               </div>
-            </Transition>
+            </div>
           </template>
 
           <template v-if="chartType === 'line'">
@@ -1166,54 +1191,54 @@ function setPieNames(show: boolean) {
             />
             <i aria-hidden="true" />
           </label>
-          <Transition name="new-design-disclosure">
-            <div
-              v-if="valuesVisible"
-              id="new-design-value-details"
-              class="new-design-disclosure"
-            >
-              <div class="new-design-disclosure-content">
-                <div class="new-design-control-row">
-                  <span>Расположение значения</span>
-                  <div
-                    class="new-design-text-tabs"
-                    aria-label="Расположение значения"
-                  >
-                    <button
-                      type="button"
-                      :class="{ active: settings.barValuePosition === 'top' }"
-                      :aria-pressed="settings.barValuePosition === 'top'"
-                      @click="settings.barValuePosition = 'top' as BarValuePosition"
-                    >Снаружи</button>
-                    <button
-                      type="button"
-                      :class="{ active: settings.barValuePosition === 'inside' }"
-                      :aria-pressed="settings.barValuePosition === 'inside'"
-                      @click="settings.barValuePosition = 'inside' as BarValuePosition"
-                    >Внутри</button>
-                  </div>
-                </div>
-                <div class="new-design-range-row">
-                  <span>Размер значений</span>
-                  <input
-                    :value="settings.valueLabelSize"
-                    type="range"
-                    min="10"
-                    max="48"
-                    step="0.5"
-                    aria-label="Размер значений"
-                    :style="rangeStyle(settings.valueLabelSize, 10, 48)"
-                    @input="settings.valueLabelSize = Number(($event.target as HTMLInputElement).value)"
-                  />
-                  <FigmaPercentInput
-                    :model-value="Math.round(((settings.valueLabelSize - 10) / 38) * 100)"
-                    label="Размер значений в процентах"
-                    @update:model-value="updateValueLabelSize"
-                  />
-                </div>
+          <div
+            :class="{ 'is-open': valuesVisible }"
+            :inert="!(valuesVisible)"
+            :aria-hidden="!(valuesVisible)"
+            id="new-design-value-details"
+            class="new-design-disclosure"
+          >
+            <div class="new-design-disclosure-content">
+              <div class="new-design-control-row">
+                <span>Расположение значения</span>
+                <AnimatedSegments
+                  class="new-design-text-tabs"
+                  aria-label="Расположение значения"
+                >
+                  <button
+                    type="button"
+                    :class="{ active: settings.barValuePosition === 'top' }"
+                    :aria-pressed="settings.barValuePosition === 'top'"
+                    @click="settings.barValuePosition = 'top' as BarValuePosition"
+                  >Снаружи</button>
+                  <button
+                    type="button"
+                    :class="{ active: settings.barValuePosition === 'inside' }"
+                    :aria-pressed="settings.barValuePosition === 'inside'"
+                    @click="settings.barValuePosition = 'inside' as BarValuePosition"
+                  >Внутри</button>
+                </AnimatedSegments>
+              </div>
+              <div class="new-design-range-row">
+                <span>Размер значений</span>
+                <input
+                  :value="settings.valueLabelSize"
+                  type="range"
+                  min="10"
+                  max="48"
+                  step="0.5"
+                  aria-label="Размер значений"
+                  :style="rangeStyle(settings.valueLabelSize, 10, 48)"
+                  @input="settings.valueLabelSize = Number(($event.target as HTMLInputElement).value)"
+                />
+                <FigmaPercentInput
+                  :model-value="Math.round(((settings.valueLabelSize - 10) / 38) * 100)"
+                  label="Размер значений в процентах"
+                  @update:model-value="updateValueLabelSize"
+                />
               </div>
             </div>
-          </Transition>
+          </div>
           <label v-if="chartType === 'bar'" class="new-design-switch-row">
             <span>Горизонтальные подписи</span>
             <input v-model="settings.showXAxisLabels" type="checkbox" />
@@ -1221,30 +1246,43 @@ function setPieNames(show: boolean) {
           </label>
           <label v-if="chartType === 'bar'" class="new-design-switch-row">
             <span>Вертикальные подписи</span>
-            <input v-model="settings.showYAxisLabels" type="checkbox" />
+            <input
+              v-model="settings.showYAxisLabels"
+              type="checkbox"
+              :aria-expanded="activeType === 'rows' ? settings.showYAxisLabels : undefined"
+              :aria-controls="activeType === 'rows' ? 'new-design-category-position-details' : undefined"
+            />
             <i aria-hidden="true" />
           </label>
           <div
-            v-if="activeType === 'rows' && settings.showYAxisLabels"
-            class="new-design-control-row"
+            v-if="activeType === 'rows'"
+            id="new-design-category-position-details"
+            class="new-design-disclosure"
+            :class="{ 'is-open': settings.showYAxisLabels }"
+            :inert="!settings.showYAxisLabels"
+            :aria-hidden="!settings.showYAxisLabels"
           >
-            <span>Положение подписей</span>
-            <div
-              class="new-design-text-tabs"
-              aria-label="Положение вертикальных подписей"
-            >
-              <button
-                type="button"
-                :class="{ active: settings.barCategoryPosition === 'inside' }"
-                :aria-pressed="settings.barCategoryPosition === 'inside'"
-                @click="settings.barCategoryPosition = 'inside' as BarCategoryPosition"
-              >В строке</button>
-              <button
-                type="button"
-                :class="{ active: settings.barCategoryPosition === 'axis' }"
-                :aria-pressed="settings.barCategoryPosition === 'axis'"
-                @click="settings.barCategoryPosition = 'axis' as BarCategoryPosition"
-              >Слева за осью</button>
+            <div class="new-design-disclosure-content">
+              <div class="new-design-control-row">
+                <span>Положение подписей</span>
+                <AnimatedSegments
+                  class="new-design-text-tabs"
+                  aria-label="Положение вертикальных подписей"
+                >
+                  <button
+                    type="button"
+                    :class="{ active: settings.barCategoryPosition === 'inside' }"
+                    :aria-pressed="settings.barCategoryPosition === 'inside'"
+                    @click="settings.barCategoryPosition = 'inside' as BarCategoryPosition"
+                  >В строке</button>
+                  <button
+                    type="button"
+                    :class="{ active: settings.barCategoryPosition === 'axis' }"
+                    :aria-pressed="settings.barCategoryPosition === 'axis'"
+                    @click="settings.barCategoryPosition = 'axis' as BarCategoryPosition"
+                  >Слева за осью</button>
+                </AnimatedSegments>
+              </div>
             </div>
           </div>
           <label
@@ -1261,51 +1299,51 @@ function setPieNames(show: boolean) {
             />
             <i aria-hidden="true" />
           </label>
-          <Transition name="new-design-disclosure">
-            <div
-              v-if="settings.showLegend"
-              id="new-design-legend-details"
-              class="new-design-disclosure"
-            >
-              <div class="new-design-disclosure-content">
-                <div class="new-design-control-row">
-                  <span>Расположение легенды</span>
-                  <div
-                    class="new-design-icon-tabs legend-position-tabs"
-                    aria-label="Расположение легенды"
+          <div
+            :class="{ 'is-open': settings.showLegend }"
+            :inert="!(settings.showLegend)"
+            :aria-hidden="!(settings.showLegend)"
+            id="new-design-legend-details"
+            class="new-design-disclosure"
+          >
+            <div class="new-design-disclosure-content">
+              <div class="new-design-control-row">
+                <span>Расположение легенды</span>
+                <AnimatedSegments
+                  class="new-design-icon-tabs legend-position-tabs"
+                  aria-label="Расположение легенды"
+                >
+                  <button
+                    v-for="choice in [
+                      { value: 'left', label: 'Слева' },
+                      { value: 'right', label: 'Справа' },
+                      { value: 'bottom', label: 'Снизу' },
+                      { value: 'top', label: 'Сверху' },
+                    ]"
+                    :key="choice.value"
+                    type="button"
+                    :class="{ active: settings.legendPosition === choice.value }"
+                    :aria-label="choice.label"
+                    :aria-pressed="settings.legendPosition === choice.value"
+                    @click="settings.legendPosition = choice.value as LegendPosition"
                   >
-                    <button
-                      v-for="choice in [
-                        { value: 'left', label: 'Слева' },
-                        { value: 'right', label: 'Справа' },
-                        { value: 'bottom', label: 'Снизу' },
-                        { value: 'top', label: 'Сверху' },
-                      ]"
-                      :key="choice.value"
-                      type="button"
-                      :class="{ active: settings.legendPosition === choice.value }"
-                      :aria-label="choice.label"
-                      :aria-pressed="settings.legendPosition === choice.value"
-                      @click="settings.legendPosition = choice.value as LegendPosition"
-                    >
-                      <img
-                        :class="`legend-position-${choice.value}`"
-                        :src="settings.legendPosition === choice.value
-                          ? legendPositionActiveIcon
-                          : legendPositionIcon"
-                        alt=""
-                      />
-                    </button>
-                  </div>
-                </div>
-                <label class="new-design-switch-row last">
-                  <span>Все элементы сразу</span>
-                  <input v-model="settings.showAllLegendItems" type="checkbox" />
-                  <i aria-hidden="true" />
-                </label>
+                    <img
+                      :class="`legend-position-${choice.value}`"
+                      :src="settings.legendPosition === choice.value
+                        ? legendPositionActiveIcon
+                        : legendPositionIcon"
+                      alt=""
+                    />
+                  </button>
+                </AnimatedSegments>
               </div>
+              <label class="new-design-switch-row last">
+                <span>Все элементы сразу</span>
+                <input v-model="settings.showAllLegendItems" type="checkbox" />
+                <i aria-hidden="true" />
+              </label>
             </div>
-          </Transition>
+          </div>
         </div>
       </section>
     </div>
@@ -1572,13 +1610,21 @@ input:focus-visible {
   padding: 0 16px;
 }
 
+.colors-section {
+  gap: 0;
+}
+
+.colors-section .new-design-section-heading {
+  margin-bottom: 16px;
+}
+
 .new-design-preset-scroll {
   display: flex;
   gap: 4px;
   width: 541px;
   overflow-x: auto;
   overflow-y: hidden;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: grab;
   scrollbar-width: none;
   touch-action: pan-y;
@@ -1588,6 +1634,7 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-bottom: 8px;
 }
 
 .new-design-preset-scroll.dragging,
@@ -1607,7 +1654,7 @@ input:focus-visible {
   justify-content: center;
   height: 40px;
   min-height: 40px;
-  padding: 10px;
+  padding: 8px;
   border: 0;
   border-radius: 41px;
   background: #fff;
@@ -1634,17 +1681,17 @@ input:focus-visible {
 
 .new-design-dots {
   display: flex;
-  flex: 0 0 92px;
+  flex: 0 0 112px;
   align-items: center;
-  width: 92px;
-  height: 20px;
+  width: 112px;
+  height: 24px;
 }
 
 .new-design-dots i {
   display: block;
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
   margin-right: -2px;
   border-radius: 50%;
   box-shadow: 0 0 0 2px #fff;
@@ -1793,14 +1840,31 @@ input:focus-visible {
 .new-design-card-stack {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
+  overflow: clip;
+  border-radius: 26px;
+}
+
+.new-design-card-stack > :is(.new-design-range-row, .new-design-control-row, .new-design-switch-row):not(:first-child) {
+  margin-top: 2px;
 }
 
 .new-design-disclosure {
   display: grid;
   min-height: 0;
+  grid-template-rows: 0fr;
+  padding-top: 0;
+  visibility: hidden;
+  transition: grid-template-rows 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    padding-top 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    visibility 0s 300ms;
+}
+
+.new-design-disclosure.is-open {
   grid-template-rows: 1fr;
-  opacity: 1;
+  padding-top: 2px;
+  visibility: visible;
+  transition-delay: 0s;
 }
 
 .new-design-disclosure-content {
@@ -1809,20 +1873,13 @@ input:focus-visible {
   overflow: hidden;
   flex-direction: column;
   gap: 2px;
-}
-
-.new-design-disclosure-enter-active,
-.new-design-disclosure-leave-active {
-  overflow: hidden;
-  transition:
-    grid-template-rows 180ms ease,
-    opacity 180ms ease;
-}
-
-.new-design-disclosure-enter-from,
-.new-design-disclosure-leave-to {
-  grid-template-rows: 0fr;
   opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.new-design-disclosure.is-open > .new-design-disclosure-content {
+  opacity: 1;
+  transition: opacity 220ms ease 40ms;
 }
 
 .new-design-range-row,
@@ -1837,6 +1894,17 @@ input:focus-visible {
   background: #fff;
   font-size: 16px;
   line-height: 20px;
+}
+
+.new-design-range-row,
+.new-design-control-row,
+.new-design-switch-row {
+  border-radius: 4px;
+  transition: border-radius 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.new-design-switch-row.last {
+  transition-delay: 100ms;
 }
 
 .new-design-range-row.first,
@@ -2012,7 +2080,7 @@ input:focus-visible {
 .new-design-icon-tabs button.active,
 .new-design-text-tabs button.active {
   color: #fff;
-  background: var(--new-ui-accent);
+  background: transparent;
 }
 
 .new-design-text-tabs button.active {
@@ -2161,9 +2229,15 @@ input:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .new-design-disclosure-enter-active,
-  .new-design-disclosure-leave-active {
-    transition-duration: 0.01ms;
+  .new-design-disclosure,
+  .new-design-disclosure-content,
+  .new-design-disclosure.is-open > .new-design-disclosure-content,
+  .new-design-range-row,
+  .new-design-control-row,
+  .new-design-switch-row,
+  .new-design-switch-row i,
+  .new-design-switch-row i::after {
+    transition: none;
   }
 }
 </style>

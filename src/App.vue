@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AnimatedSegments from './components/AnimatedSegments.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
@@ -23,6 +24,7 @@ import NewDesignPanel from './components/NewDesignPanel.vue'
 import NewChartDataEditor from './components/NewChartDataEditor.vue'
 import NewUiAppShell from './components/NewUiAppShell.vue'
 import { generateMonochromePalette } from './colorPalette'
+import { NEW_UI_PALETTE_CHOICES } from './newUiPalettes'
 import {
   applyChartStyle,
   getLegendOrientation,
@@ -1050,26 +1052,6 @@ function hslToHex(hue: number, saturation: number, lightness: number) {
     .join('')}`
 }
 
-function randomizePalette() {
-  const colorCount = Math.max(5, requiredPaletteColorCount.value)
-  const baseHue = randomInteger(0, 359)
-  const hueStep = 137.508
-  const palette = Array.from({ length: colorCount }, (_, index) =>
-    hslToHex(
-      baseHue + hueStep * index + randomInteger(-12, 12),
-      randomInteger(58, 86),
-      randomInteger(42, 68),
-    ),
-  )
-
-  styleSettings.value = {
-    ...styleSettings.value,
-    palette,
-    paletteOpacities: palette.map(() => 100),
-  }
-  selectedPaletteId.value = 'custom'
-}
-
 function approximateTextWidth(text: string, fontSize: number) {
   return Array.from(text).reduce(
     (width, character) =>
@@ -1269,19 +1251,22 @@ function randomizeChartStyle() {
     selectChartType(randomChoice(alternatives))
   }
 
-  const baseHue = randomInteger(0, 359)
   const backgroundColor = randomHexColor(
     normalizeHexColor(styleSettings.value.backgroundColor),
   )
   const readable = readableColors(backgroundColor)
-  const harmony = [0, 28, 58, 142, 178, 214, 264, 310, 336]
-  const palette = harmony.map((offset, index) =>
-    hslToHex(
-      baseHue + offset + randomInteger(-8, 8),
-      randomInteger(68, 92),
-      index < 3 ? randomInteger(48, 62) : randomInteger(52, 68),
-    ),
+  const paletteChoices = isNewUi.value
+    ? NEW_UI_PALETTE_CHOICES
+    : PALETTE_PRESETS
+  const availablePalettes = paletteChoices.filter(
+    (choice) => choice.id !== selectedPaletteId.value,
   )
+  const selectedPalette = randomChoice(
+    availablePalettes.length > 0 ? availablePalettes : paletteChoices,
+  )
+  const palette = selectedPalette.id === 'mono'
+    ? monochromePalette()
+    : [...selectedPalette.colors]
   const presentation = styleSettings.value.presentationMode
   const currentType = chartType.value
   const currentKind = activeNewUiChartKind()
@@ -1375,7 +1360,7 @@ function randomizeChartStyle() {
     textColor: readable.text,
     mutedTextColor: readable.muted,
     palette,
-    paletteOpacities: palette.map(() => randomInteger(78, 100)),
+    paletteOpacities: palette.map(() => 100),
     valueLabelSize: nextValueLabelSize,
     pieLabelSize: randomInteger(12, 24),
     showXAxisLabels: presentation && currentType === 'line'
@@ -1450,7 +1435,7 @@ function randomizeChartStyle() {
   }
   customBackground.value = backgroundColor
   selectedBackgroundId.value = 'custom'
-  selectedPaletteId.value = 'custom'
+  selectedPaletteId.value = selectedPalette.id
 }
 
 function cloneInitialSeries(): DataSeries[] {
@@ -2488,7 +2473,6 @@ async function copyOption() {
         @update:mono-base-color="updateMonoBaseColor"
         @mark-palette-custom="markPaletteCustom"
         @add-palette-color="addPaletteColor"
-        @randomize-palette="randomizePalette"
         @randomize="randomizeChartStyle"
         @clear="resetNewDesign"
         @close="uiDesignMode = 'classic'"
@@ -2540,7 +2524,7 @@ async function copyOption() {
         <h1>Дефолтные графики Apache ECharts</h1>
       </div>
       <div class="header-actions">
-        <div class="ui-design-switch" aria-label="Вид интерфейса">
+        <AnimatedSegments class="ui-design-switch" aria-label="Вид интерфейса">
           <button
             type="button"
             :class="{ active: uiDesignMode === 'classic' }"
@@ -2557,7 +2541,7 @@ async function copyOption() {
           >
             Новый UI
           </button>
-        </div>
+        </AnimatedSegments>
         <button class="secondary-button" type="button" @click="resetData">
           Сбросить данные
         </button>
@@ -2663,7 +2647,7 @@ async function copyOption() {
               </label>
               <div class="choice-row">
                 <span>Компоновка</span>
-                <div class="segmented-control" aria-label="Компоновка столбцов">
+                <AnimatedSegments class="segmented-control" aria-label="Компоновка столбцов">
                   <button
                     v-for="choice in [
                       { value: 'grouped', label: 'Рядом' },
@@ -2677,7 +2661,7 @@ async function copyOption() {
                   >
                     {{ choice.label }}
                   </button>
-                </div>
+                </AnimatedSegments>
               </div>
               <label class="range-control">
                 <span>Скругление</span>
@@ -2739,7 +2723,7 @@ async function copyOption() {
               </div>
               <div class="choice-row">
                 <span>Значения</span>
-                <div class="segmented-control" aria-label="Положение значений">
+                <AnimatedSegments class="segmented-control" aria-label="Положение значений">
                   <button
                     v-for="choice in [
                       { value: 'inside', label: 'Внутри' },
@@ -2752,11 +2736,11 @@ async function copyOption() {
                   >
                     {{ choice.label }}
                   </button>
-                </div>
+                </AnimatedSegments>
               </div>
               <div class="choice-row">
                 <span>Категории</span>
-                <div class="segmented-control" aria-label="Положение категорий">
+                <AnimatedSegments class="segmented-control" aria-label="Положение категорий">
                   <button
                     v-for="choice in [
                       { value: 'axis', label: 'У оси' },
@@ -2769,7 +2753,7 @@ async function copyOption() {
                   >
                     {{ choice.label }}
                   </button>
-                </div>
+                </AnimatedSegments>
               </div>
               <details class="advanced-settings">
                 <summary>Ширина, граница и фон</summary>

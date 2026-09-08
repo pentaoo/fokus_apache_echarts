@@ -22,7 +22,7 @@ export type PalettePresetId =
   | 'accessible'
   | 'custom'
 
-export type CatalogPaletteId = `catalog-${'L' | 'D'}${number}`
+export type CatalogPaletteId = `catalog-${'L' | 'D' | 'U'}${number}`
 
 export type PaletteSelectionId = PalettePresetId | CatalogPaletteId | 'chalk'
 

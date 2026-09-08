@@ -148,6 +148,7 @@ h2 {
 }
 
 .ui-design-switch {
+  --segment-color: #5500eb;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   padding: 3px;
@@ -172,7 +173,7 @@ h2 {
 
 .ui-design-switch button.active {
   color: #fff;
-  background: #5500eb;
+  background: transparent;
   font-weight: 650;
 }
 
@@ -546,6 +547,7 @@ td input {
 }
 
 .segmented-control {
+  --segment-radius: 4px;
   display: grid;
   grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column;
@@ -577,7 +579,7 @@ td input {
 
 .segmented-control button.active {
   color: #fff;
-  background: #6f42c1;
+  background: transparent;
   font-weight: 650;
 }
 

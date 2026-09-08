@@ -60,6 +60,12 @@ const showBottomFade = ref(false)
 const importMessage = ref('')
 const importMessageKind = ref<'success' | 'error'>('success')
 let importMessageTimer: ReturnType<typeof setTimeout> | undefined
+let rowScrollFrame = 0
+
+function stopRowScroll() {
+  cancelAnimationFrame(rowScrollFrame)
+  rowScrollFrame = 0
+}
 
 const tableStyle = computed(() => {
   const seriesColumnCount = Math.max(1, props.series.length)
@@ -157,18 +163,110 @@ function normalizeNumber(seriesId: number, rowIndex: number, event: FocusEvent) 
   }
 }
 
+function resetRowLayout() {
+  const scroll = scrollElement.value
+  if (!scroll) return
+  scroll.style.height = ''
+  scroll.style.paddingBottom = ''
+  updateOverflowState()
+}
+
+function interruptRowScroll(event: Event) {
+  // A repeated deletion continues from the current geometry without a jump.
+  const deleting = (event.target as HTMLElement).closest('.delete-row') &&
+    (event.type === 'pointerdown' || event.type === 'touchstart' ||
+      (event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ')))
+  if (deleting) return
+  stopRowScroll()
+  resetRowLayout()
+}
+
+function animateRowLayout(scroll: HTMLElement, startTop: number, revealEnd: boolean) {
+  const tableHeight = scroll.querySelector('table')?.getBoundingClientRect().height ?? 0
+  const startHeight = scroll.getBoundingClientRect().height
+  const padding = Number.parseFloat(scroll.style.paddingBottom) || 0
+  const maximumHeight = Number.parseFloat(getComputedStyle(scroll).maxHeight)
+  const endHeight = Math.min(tableHeight, maximumHeight)
+  const end = revealEnd
+    ? Math.max(0, tableHeight - endHeight)
+    : Math.min(startTop, Math.max(0, tableHeight - endHeight))
+  const distance = end - startTop
+  const finish = () => {
+    rowScrollFrame = 0
+    resetRowLayout()
+    scroll.scrollTop = end
+    updateOverflowState()
+  }
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+    (Math.abs(distance) < 1 && Math.abs(startHeight - endHeight) < 1 && padding < 1)) {
+    finish()
+    return
+  }
+  const duration = Math.min(450, 300 + Math.max(Math.abs(distance), padding) * 0.25)
+  const startedAt = performance.now()
+  const animate = (now: number) => {
+    const progress = Math.min(1, (now - startedAt) / duration)
+    const eased = progress < 0.5
+      ? 4 * progress ** 3
+      : 1 - (-2 * progress + 2) ** 3 / 2
+    scroll.style.height = `${startHeight + (endHeight - startHeight) * eased}px`
+    scroll.style.paddingBottom = `${padding * (1 - eased)}px`
+    scroll.scrollTop = startTop + distance * eased
+    updateOverflowState()
+    if (progress < 1) rowScrollFrame = requestAnimationFrame(animate)
+    else finish()
+  }
+  rowScrollFrame = requestAnimationFrame(animate)
+}
+
 async function addRow() {
+  stopRowScroll()
+  const scroll = scrollElement.value
+  if (!scroll) return
+  const startTop = scroll.scrollTop
+  scroll.style.height = `${scroll.getBoundingClientRect().height}px`
   const row = props.categories.length + 1
   emit('add-row')
   await nextTick()
-  requestAnimationFrame(() => {
-    if (scrollElement.value) scrollElement.value.scrollTop = scrollElement.value.scrollHeight
-    focusCell(row, 0)
-    updateOverflowState()
-  })
+  if (scrollElement.value !== scroll) return
+  const target = editableCells().find(
+    (cell) => Number(cell.dataset.row) === row && Number(cell.dataset.column) === 0,
+  )
+  // Focus must not trigger the browser's instant scroll before our animation.
+  target?.focus({ preventScroll: true })
+  target?.select()
+  animateRowLayout(scroll, startTop, true)
+}
+
+async function removeRow(rowIndex: number) {
+  stopRowScroll()
+  const scroll = scrollElement.value
+  const row = scroll?.querySelectorAll('tbody tr')[rowIndex]
+  if (!scroll || !row) return
+  const startTop = scroll.scrollTop
+  const keepFocus = row.contains(document.activeElement)
+  scroll.style.height = `${scroll.getBoundingClientRect().height}px`
+  // Retain the removed row's space until scrolling finishes; otherwise the browser
+  // immediately clamps scrollTop to the shorter table and skips the animation.
+  const padding = Number.parseFloat(scroll.style.paddingBottom) || 0
+  scroll.style.paddingBottom = `${padding + row.getBoundingClientRect().height}px`
+  emit('remove-row', rowIndex)
+  await nextTick()
+  if (scrollElement.value !== scroll) return
+  if (keepFocus) {
+    const nextRow = Math.min(rowIndex, props.categories.length - 1)
+    const target = scroll.querySelector<HTMLInputElement>(
+      `[data-grid-cell][data-row="${nextRow + 1}"][data-column="0"]`,
+    )
+      ?? scroll.closest('section')?.querySelector<HTMLButtonElement>('.add-row-button')
+    target?.focus({ preventScroll: true })
+  }
+  animateRowLayout(scroll, startTop, false)
 }
 
 async function addSeries() {
+  stopRowScroll()
+  resetRowLayout()
   const column = props.series.length + 1
   emit('add-series')
   await nextTick()
@@ -178,6 +276,8 @@ async function addSeries() {
 }
 
 function clearTable() {
+  stopRowScroll()
+  resetRowLayout()
   emit('clear')
   closeMenu(true)
   nextTick(updateOverflowState)
@@ -349,6 +449,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopRowScroll()
   document.removeEventListener('pointerdown', onDocumentPointerDown)
   if (importMessageTimer) clearTimeout(importMessageTimer)
 })
@@ -362,6 +463,10 @@ onBeforeUnmount(() => {
         class="new-data-scroll"
         :class="{ 'has-bottom-fade': showBottomFade }"
         @scroll="updateOverflowState"
+        @wheel.passive="interruptRowScroll"
+        @touchstart.passive="interruptRowScroll"
+        @pointerdown="interruptRowScroll"
+        @keydown="interruptRowScroll"
       >
         <table :style="tableStyle">
           <thead>
@@ -414,7 +519,7 @@ onBeforeUnmount(() => {
             <tr v-for="(category, rowIndex) in categories" :key="rowIndex">
               <th class="row-index" scope="row">
                 <span>{{ rowIndex + 1 }}</span>
-                <button type="button" :aria-label="`Удалить строку ${rowIndex + 1}`" @click="emit('remove-row', rowIndex)">
+                <button type="button" class="delete-row" :aria-label="`Удалить строку ${rowIndex + 1}`" @click="removeRow(rowIndex)">
                   <img :src="tableClearIcon" alt="" />
                 </button>
               </th>
@@ -471,16 +576,18 @@ onBeforeUnmount(() => {
           <img class="menu-icon-default" :src="moreVertPurpleIcon" alt="" />
           <img class="menu-icon-active" :src="moreVertWhiteIcon" alt="" />
         </button>
-        <div v-if="menuOpen" class="data-menu" role="menu" @keydown.esc.prevent="closeMenu(true)">
-          <button ref="importButton" type="button" role="menuitem" @click="openImportDialog">
-            <img :src="menuImportIcon" alt="" />
-            <span>Импортировать</span>
-          </button>
-          <button type="button" role="menuitem" @click="clearTable">
-            <img :src="menuDeleteIcon" alt="" />
-            <span>Очистить</span>
-          </button>
-        </div>
+        <Transition name="data-menu">
+          <div v-show="menuOpen" class="data-menu" role="menu" :inert="!menuOpen" :aria-hidden="!menuOpen" @keydown.esc.prevent="closeMenu(true)">
+            <button ref="importButton" type="button" role="menuitem" @click="openImportDialog">
+              <img :src="menuImportIcon" alt="" />
+              <span>Импортировать</span>
+            </button>
+            <button type="button" role="menuitem" @click="clearTable">
+              <img :src="menuDeleteIcon" alt="" />
+              <span>Очистить</span>
+            </button>
+          </div>
+        </Transition>
       </div>
       <input
         ref="fileInput"
@@ -506,7 +613,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .new-data-editor { position: relative; width: 100%; font-family: "ALS Hauss", Arial, sans-serif; }
 .new-data-main { display: flex; width: 100%; align-items: stretch; gap: 2px; }
-.new-data-scroll { position: relative; flex: 1 1 auto; width: 0; max-height: 240px; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: none; border-radius: 16px 4px 4px 4px; scrollbar-width: none; }
+.new-data-scroll { overflow-anchor: none; position: relative; flex: 1 1 auto; width: 0; max-height: 240px; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: none; border-radius: 16px 4px 4px 4px; scrollbar-width: none; }
 .new-data-scroll::-webkit-scrollbar { display: none; }
 .new-data-scroll::after { position: sticky; z-index: 5; bottom: 0; left: 0; display: block; width: 100%; height: 24px; margin-top: -24px; background: linear-gradient(transparent, #f6f6f6); content: ""; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
 .new-data-scroll.has-bottom-fade::after { opacity: 1; }
@@ -546,13 +653,13 @@ tbody .row-index button { top: 12px; left: 12px; }
 .add-row-button { display: flex; flex: 1; height: 40px; align-items: center; justify-content: center; padding: 8px 10px 8px 52px; border: 0; border-radius: 8px 4px 4px 26px; color: #000; background: #fff; font-size: 16px; line-height: 24px; text-align: center; }
 .add-row-button:hover, .add-row-button:focus-visible { background: #ececec; outline: 0; }
 .data-menu-root { position: relative; flex: 0 0 40px; }
-.data-menu-button { display: flex; width: 40px; min-width: 40px; height: 40px; min-height: 40px; align-items: center; justify-content: center; padding: 6px 12px; border: 0; border-radius: 4px 4px 20px 4px; background: #fff; }
-.data-menu-button img { display: block; width: 24px; min-width: 24px; height: 24px; min-height: 24px; }
-.data-menu-button .menu-icon-active { display: none; }
+.data-menu-button { display: grid; width: 40px; min-width: 40px; height: 40px; min-height: 40px; align-items: center; justify-content: center; padding: 8px; border: 0; border-radius: 4px 4px 20px 4px; background: #fff; transition: border-radius 240ms cubic-bezier(0.22, 1, 0.36, 1), background-color 200ms ease; }
+.data-menu-button img { grid-area: 1 / 1; transition: opacity 180ms ease; display: block; width: 24px; min-width: 24px; height: 24px; min-height: 24px; }
+.data-menu-button .menu-icon-active { opacity: 0; }
 .data-menu-button:hover, .data-menu-button:focus-visible { background: #ccc; }
-.data-menu-button.open .menu-icon-default { display: none; }
-.data-menu-button.open .menu-icon-active { display: block; }
-.data-menu-button.open { padding: 8px; border-radius: 20px; background: #000; }
+.data-menu-button.open .menu-icon-default { opacity: 0; }
+.data-menu-button.open .menu-icon-active { opacity: 1; }
+.data-menu-button.open { border-radius: 20px; background: #000; }
 .data-menu { position: absolute; z-index: 20; right: 0; top: 44px; display: flex; width: 193px; flex-direction: column; align-items: stretch; gap: 2px; overflow: hidden; box-sizing: border-box; padding: 6px; border-radius: 16px 4px 16px 16px; background: #000; }
 .data-menu button { display: flex; width: 181px; min-height: 32px; align-items: center; gap: 6px; padding: 6px 9px 6px 6px; border: 0; border-radius: 10px; color: #fff; background: transparent; font: 400 14px/16px "ALS Hauss", Arial, sans-serif; text-align: left; white-space: nowrap; }
 .data-menu button img { display: block; width: 20px; min-width: 20px; height: 20px; min-height: 20px; }
@@ -562,4 +669,23 @@ tbody .row-index button { top: 12px; left: 12px; }
 .import-message.is-error { background: #b42318; }
 .new-data-editor :is(input, button):focus,
 .new-data-editor :is(input, button):focus-visible { outline: 0 !important; box-shadow: none !important; }
+.data-menu-enter-active,
+.data-menu-leave-active {
+  transform-origin: top right;
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.data-menu-enter-from,
+.data-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.data-menu-leave-active { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .data-menu-button,
+  .data-menu-button img,
+  .data-menu-enter-active,
+  .data-menu-leave-active {
+    transition: none;
+  }
+}
 </style>
