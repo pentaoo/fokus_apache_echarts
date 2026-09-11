@@ -27,7 +27,6 @@ import {
 import type { ChartType, PaletteSelectionId } from '../stylePresets'
 import {
   NEW_UI_PALETTE_CHOICES,
-  type NewUiPaletteGroup,
   type NewUiPaletteChoice,
 } from '../newUiPalettes'
 import alignCenterIcon from '../assets/new-ui/align-center.svg'
@@ -79,9 +78,30 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const paletteGroupOrder: NewUiPaletteGroup[] = ['bright', 'dark', 'pastel']
-const paletteRows: NewUiPaletteChoice[][] = paletteGroupOrder.map((group) =>
-  NEW_UI_PALETTE_CHOICES.filter((choice) => choice.group === group),
+const PALETTE_ROW_COUNT = 3
+
+function distributePaletteChoices(
+  choices: readonly NewUiPaletteChoice[],
+  rowCount: number,
+): NewUiPaletteChoice[][] {
+  if (choices.length === 0) return []
+
+  const resolvedRowCount = Math.min(Math.max(1, rowCount), choices.length)
+  const baseRowSize = Math.floor(choices.length / resolvedRowCount)
+  const remainder = choices.length % resolvedRowCount
+  let startIndex = 0
+
+  return Array.from({ length: resolvedRowCount }, (_, rowIndex) => {
+    const rowSize = baseRowSize + (rowIndex < remainder ? 1 : 0)
+    const row = choices.slice(startIndex, startIndex + rowSize)
+    startIndex += rowSize
+    return row
+  })
+}
+
+const paletteRows = distributePaletteChoices(
+  NEW_UI_PALETTE_CHOICES,
+  PALETTE_ROW_COUNT,
 )
 
 const typeChoices: Array<{
@@ -1680,6 +1700,7 @@ input:focus-visible {
   width: 541px;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior-x: none;
   border-radius: 8px;
   cursor: grab;
   scrollbar-width: none;
