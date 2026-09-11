@@ -65,12 +65,6 @@ export const NEW_UI_PALETTE_CHOICES: NewUiPaletteChoice[] = [
     group: 'dark',
   },
   {
-    id: 'catalog-U05' as CatalogPaletteId,
-    name: 'U05 Сигнальная пятёрка',
-    colors: ['#f8ffe5', '#06d6a0', '#1b9aaa', '#ef476f', '#ffc43d'],
-    group: 'dark',
-  },
-  {
     id: 'catalog-U08' as CatalogPaletteId,
     name: 'U08 Индиго и селадон',
     colors: ['#360568', '#5b2a86', '#7785ac', '#9ac6c5', '#a5e6ba'],
@@ -80,6 +74,54 @@ export const NEW_UI_PALETTE_CHOICES: NewUiPaletteChoice[] = [
     id: 'catalog-U10' as CatalogPaletteId,
     name: 'U10 Мята и канарейка',
     colors: ['#d6f8d6', '#7fc6a4', '#5d737e', '#55505c', '#faf33e'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D14' as CatalogPaletteId,
+    name: 'D14 Индиго и апельсин',
+    colors: ['#5e6883', '#a0550c', '#6c6863', '#5865a1', '#666687'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D15' as CatalogPaletteId,
+    name: 'D15 Атлантика и коралл',
+    colors: ['#65696c', '#846334', '#9c5547', '#416c92', '#66696b'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D16' as CatalogPaletteId,
+    name: 'D16 Терракота и туман',
+    colors: ['#696962', '#576d6e', '#b44427', '#756564', '#8d5c5b'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D17' as CatalogPaletteId,
+    name: 'D17 Весенняя биржа',
+    colors: ['#686d24', '#45743c', '#007848', '#4669a3', '#566b80'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D18' as CatalogPaletteId,
+    name: 'D18 Овсяный графит',
+    colors: ['#6d6860', '#8a6035', '#a35139', '#5e6a77', '#626972'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D20' as CatalogPaletteId,
+    name: 'D20 Глубокая весна',
+    colors: ['#00203e', '#dbe54c', '#76c365', '#00804c', '#1e4890'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D21' as CatalogPaletteId,
+    name: 'D21 Коралл и лёд',
+    colors: ['#351e1f', '#a0c8cb', '#fe6038', '#753435'],
+    group: 'dark',
+  },
+  {
+    id: 'catalog-D22' as CatalogPaletteId,
+    name: 'D22 Янтарный сланец',
+    colors: ['#2c3b4e', '#feb261', '#a45139', '#1c2632', '#c8c2b2'],
     group: 'dark',
   },
   {

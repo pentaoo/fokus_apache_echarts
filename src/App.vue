@@ -2184,6 +2184,23 @@ const newUiOption = computed<ChartOption>(() => {
   const scaledValueLabelSize = Math.round(
     settingsSnapshot.valueLabelSize * scale,
   )
+  const topSeriesOverflowReserve =
+    settingsSnapshot.showValueLabels &&
+    settingsSnapshot.barValuePosition === 'top' &&
+    kind !== 'rows'
+      ? Math.ceil(scaledValueLabelSize * 1.25 + 6 * scale)
+      : kind === 'line'
+        ? Math.ceil(
+            Math.max(
+              settingsSnapshot.showLines ? settingsSnapshot.lineWidth : 0,
+              settingsSnapshot.showLineSymbols
+                ? settingsSnapshot.lineSymbolSize
+                : 0,
+            ) * scale / 2,
+          )
+        : 0
+  const cartesianGridTop =
+    topContentReserve + safeContentInset + topSeriesOverflowReserve
   const actualBarThickness = automaticBarThickness
   const proportionalBarRadius =
     (actualBarThickness / 2) *
@@ -2303,7 +2320,7 @@ const newUiOption = computed<ChartOption>(() => {
         right:
           safeContentInset +
           (resolvedLegendPosition === 'right' ? legendSideReserve : 0),
-        top: topContentReserve + safeContentInset,
+        top: cartesianGridTop,
         bottom: bottomContentReserve + safeContentInset,
       }
     } else {
@@ -2315,7 +2332,7 @@ const newUiOption = computed<ChartOption>(() => {
         right:
           safeContentInset +
           (resolvedLegendPosition === 'right' ? legendSideReserve : 0),
-        top: topContentReserve + safeContentInset,
+        top: cartesianGridTop,
         bottom: bottomContentReserve + safeContentInset,
       }
     }
@@ -2344,7 +2361,7 @@ const newUiOption = computed<ChartOption>(() => {
       right:
         safeContentInset +
         (resolvedLegendPosition === 'right' ? legendSideReserve : 0),
-      top: topContentReserve + safeContentInset,
+      top: cartesianGridTop,
       bottom: bottomContentReserve + safeContentInset,
     }
   }

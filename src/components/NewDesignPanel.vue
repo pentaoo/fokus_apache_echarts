@@ -613,37 +613,41 @@ function setPieNames(show: boolean) {
             Случайная
           </button>
         </div>
-        <div class="new-design-preset-rows">
-          <div
-            v-for="(row, rowIndex) in paletteRows"
-            :key="rowIndex"
-            class="new-design-preset-scroll"
-            :class="{ dragging: presetDragging }"
-            @pointerdown="startPresetDrag"
-            @pointermove="movePresetDrag"
-            @pointerup="finishPresetDrag"
-            @pointercancel="finishPresetDrag"
-            @click.capture="preventPresetClick"
-          >
-            <button
-              v-for="choice in row"
-              :key="choice.id"
-              type="button"
-              class="new-design-preset"
-              :class="{ active: selectedPaletteId === choice.id }"
-              :aria-pressed="selectedPaletteId === choice.id"
-              :aria-label="choice.name"
-              :title="choice.colors.join(', ')"
-              @click="setPalette(choice)"
+        <div
+          class="new-design-preset-scroll"
+          :class="{ dragging: presetDragging }"
+          @pointerdown="startPresetDrag"
+          @pointermove="movePresetDrag"
+          @pointerup="finishPresetDrag"
+          @pointercancel="finishPresetDrag"
+          @click.capture="preventPresetClick"
+        >
+          <div class="new-design-preset-rows">
+            <div
+              v-for="(row, rowIndex) in paletteRows"
+              :key="rowIndex"
+              class="new-design-preset-row"
             >
-              <span class="new-design-dots" aria-hidden="true">
-                <i
-                  v-for="color in palettePreview(choice)"
-                  :key="color"
-                  :style="{ backgroundColor: color }"
-                />
-              </span>
-            </button>
+              <button
+                v-for="choice in row"
+                :key="choice.id"
+                type="button"
+                class="new-design-preset"
+                :class="{ active: selectedPaletteId === choice.id }"
+                :aria-pressed="selectedPaletteId === choice.id"
+                :aria-label="choice.name"
+                :title="choice.colors.join(', ')"
+                @click="setPalette(choice)"
+              >
+                <span class="new-design-dots" aria-hidden="true">
+                  <i
+                    v-for="color in palettePreview(choice)"
+                    :key="color"
+                    :style="{ backgroundColor: color }"
+                  />
+                </span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1673,8 +1677,6 @@ input:focus-visible {
 }
 
 .new-design-preset-scroll {
-  display: flex;
-  gap: 4px;
   width: 541px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -1686,9 +1688,17 @@ input:focus-visible {
 
 .new-design-preset-rows {
   display: flex;
+  width: max-content;
+  min-width: 100%;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.new-design-preset-row {
+  display: flex;
+  width: max-content;
+  gap: 4px;
 }
 
 .new-design-preset-scroll.dragging,
