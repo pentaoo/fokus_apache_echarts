@@ -83,12 +83,6 @@ export const NEW_UI_PALETTE_CHOICES: NewUiPaletteChoice[] = [
     group: 'dark',
   },
   {
-    id: 'catalog-D15' as CatalogPaletteId,
-    name: 'D15 Атлантика и коралл',
-    colors: ['#65696c', '#846334', '#9c5547', '#416c92', '#66696b'],
-    group: 'dark',
-  },
-  {
     id: 'catalog-D16' as CatalogPaletteId,
     name: 'D16 Терракота и туман',
     colors: ['#696962', '#576d6e', '#b44427', '#756564', '#8d5c5b'],
