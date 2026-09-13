@@ -410,9 +410,12 @@ function selectRandomPalette() {
 }
 
 function palettePreview(choice: NewUiPaletteChoice) {
-  return choice.id === 'mono'
-    ? monochromePreview.value.slice(0, 5)
-    : choice.colors.slice(0, 5)
+  const colors = choice.id === 'mono' ? monochromePreview.value : choice.colors
+  if (colors.length === 0) return []
+
+  return Array.from({ length: 5 }, (_, index) =>
+    colors[index % colors.length],
+  )
 }
 
 function updatePaletteColor(index: number, value: string) {
@@ -661,8 +664,8 @@ function setPieNames(show: boolean) {
               >
                 <span class="new-design-dots" aria-hidden="true">
                   <i
-                    v-for="color in palettePreview(choice)"
-                    :key="color"
+                    v-for="(color, colorIndex) in palettePreview(choice)"
+                    :key="`${color}-${colorIndex}`"
                     :style="{ backgroundColor: color }"
                   />
                 </span>
@@ -1735,24 +1738,21 @@ input:focus-visible {
 .new-design-preset {
   display: flex;
   flex: 0 0 auto;
+  width: 84px;
   align-items: center;
   justify-content: center;
-  height: 40px;
-  min-height: 40px;
-  padding: 8px;
+  height: 28px;
+  min-height: 28px;
+  padding: 2px;
   border: 0;
-  border-radius: 41px;
+  border-radius: 16px;
   background: #fff;
   font-size: 14px;
   line-height: 16px;
 }
 
 .new-design-preset:hover {
-  background: #ececec;
-}
-
-.new-design-preset:hover .new-design-dots i {
-  box-shadow: 0 0 0 2px #ececec;
+  background: #ebebeb;
 }
 
 .new-design-preset.active {
@@ -1760,30 +1760,21 @@ input:focus-visible {
   background: #000;
 }
 
-.new-design-preset.active .new-design-dots i {
-  box-shadow: 0 0 0 2px #000;
-}
-
 .new-design-dots {
   display: flex;
-  flex: 0 0 112px;
+  flex: 0 0 80px;
   align-items: center;
-  width: 112px;
+  width: 80px;
   height: 24px;
+  overflow: hidden;
+  border-radius: 12px;
 }
 
 .new-design-dots i {
   display: block;
-  flex: 0 0 24px;
-  width: 24px;
+  flex: 0 0 16px;
+  width: 16px;
   height: 24px;
-  margin-right: -2px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px #fff;
-}
-
-.new-design-dots i:last-child {
-  margin-right: 0;
 }
 
 .new-design-palette-card {
