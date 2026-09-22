@@ -78,32 +78,6 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const PALETTE_ROW_COUNT = 3
-
-function distributePaletteChoices(
-  choices: readonly NewUiPaletteChoice[],
-  rowCount: number,
-): NewUiPaletteChoice[][] {
-  if (choices.length === 0) return []
-
-  const resolvedRowCount = Math.min(Math.max(1, rowCount), choices.length)
-  const baseRowSize = Math.floor(choices.length / resolvedRowCount)
-  const remainder = choices.length % resolvedRowCount
-  let startIndex = 0
-
-  return Array.from({ length: resolvedRowCount }, (_, rowIndex) => {
-    const rowSize = baseRowSize + (rowIndex < remainder ? 1 : 0)
-    const row = choices.slice(startIndex, startIndex + rowSize)
-    startIndex += rowSize
-    return row
-  })
-}
-
-const paletteRows = distributePaletteChoices(
-  NEW_UI_PALETTE_CHOICES,
-  PALETTE_ROW_COUNT,
-)
-
 const typeChoices: Array<{
   id: 'columns' | 'rows' | 'doughnut' | 'pie' | 'line'
   label: string
@@ -645,33 +619,25 @@ function setPieNames(show: boolean) {
           @pointercancel="finishPresetDrag"
           @click.capture="preventPresetClick"
         >
-          <div class="new-design-preset-rows">
-            <div
-              v-for="(row, rowIndex) in paletteRows"
-              :key="rowIndex"
-              class="new-design-preset-row"
-            >
-              <button
-                v-for="choice in row"
-                :key="choice.id"
-                type="button"
-                class="new-design-preset"
-                :class="{ active: selectedPaletteId === choice.id }"
-                :aria-pressed="selectedPaletteId === choice.id"
-                :aria-label="choice.name"
-                :title="choice.colors.join(', ')"
-                @click="setPalette(choice)"
-              >
-                <span class="new-design-dots" aria-hidden="true">
-                  <i
-                    v-for="(color, colorIndex) in palettePreview(choice)"
-                    :key="`${color}-${colorIndex}`"
-                    :style="{ backgroundColor: color }"
-                  />
-                </span>
-              </button>
-            </div>
-          </div>
+          <button
+            v-for="choice in NEW_UI_PALETTE_CHOICES"
+            :key="choice.id"
+            type="button"
+            class="new-design-preset"
+            :class="{ active: selectedPaletteId === choice.id }"
+            :aria-pressed="selectedPaletteId === choice.id"
+            :aria-label="choice.name"
+            :title="choice.colors.join(', ')"
+            @click="setPalette(choice)"
+          >
+            <span class="new-design-dots" aria-hidden="true">
+              <i
+                v-for="(color, colorIndex) in palettePreview(choice)"
+                :key="`${color}-${colorIndex}`"
+                :style="{ backgroundColor: color }"
+              />
+            </span>
+          </button>
         </div>
 
         <div class="new-design-palette-stack">
@@ -1700,7 +1666,11 @@ input:focus-visible {
 }
 
 .new-design-preset-scroll {
-  width: 541px;
+  display: flex;
+  width: 100%;
+  max-width: 541px;
+  gap: 4px;
+  margin-bottom: 8px;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: none;
@@ -1708,21 +1678,6 @@ input:focus-visible {
   cursor: grab;
   scrollbar-width: none;
   touch-action: pan-y;
-}
-
-.new-design-preset-rows {
-  display: flex;
-  width: max-content;
-  min-width: 100%;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.new-design-preset-row {
-  display: flex;
-  width: max-content;
-  gap: 4px;
 }
 
 .new-design-preset-scroll.dragging,
